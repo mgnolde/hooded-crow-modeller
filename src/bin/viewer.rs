@@ -1,22 +1,21 @@
-use std::fs;
 use bevy::{
-    asset::Assets,
-    ecs::system::Commands,
-    pbr::{PbrBundle, StandardMaterial},
-    render::{
-        color::Color,
-        mesh::Mesh,
-    },
-    transform::components::Transform,
-    utils::default,
-    ecs::component::Component,
     prelude::*,
+    sprite::Sprite,
+    text::{Text2dBundle, Text, TextStyle},
     input::mouse::{MouseWheel, MouseMotion},
 };
 use clap::Parser;
-use std::path::PathBuf;
+use std::{
+    fs,
+    collections::BTreeMap,
+    path::PathBuf,
+};
 use gltf::json::{self, validation::Checked};
-use std::collections::BTreeMap;
+use gltf_json::{
+    mesh,
+    validation::USize64,
+    Index,
+};
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -36,6 +35,12 @@ struct PointsFile(String);
 struct MeshData {
     vertices: Vec<[f32; 3]>,
     indices: Vec<u32>,
+    metadata: Vec<NodeMetadata>,
+}
+
+#[derive(serde::Deserialize)]
+struct NodeMetadata {
+    text: String,
 }
 
 #[derive(Component)]
@@ -56,12 +61,31 @@ struct MeshFilePath(String);
 #[derive(Resource)]
 struct ExportPath(Option<PathBuf>);
 
+#[derive(Component)]
+struct MetadataLabel;
+
+#[derive(Component)]
+struct Billboard;
+
+#[derive(Component)]
+struct VertexLabel {
+    vertex_index: usize,
+    world_position: Vec3,
+}
+
 fn main() {
     let args = Args::parse();
     let mesh_file = args.mesh_file.clone();
 
     App::new()
-        .add_plugins(DefaultPlugins)
+        .add_plugins(DefaultPlugins.set(WindowPlugin {
+            primary_window: Some(Window {
+                title: "3D Viewer".into(),
+                resolution: (800., 600.).into(),
+                ..default()
+            }),
+            ..default()
+        }))
         .insert_resource(MeshFilePath(mesh_file))
         .insert_resource(ExportPath(args.export))
         .add_systems(Startup, (setup, spawn_mesh))
@@ -69,7 +93,9 @@ fn main() {
             bevy::window::close_on_esc,
             check_file_changes,
             orbit_camera,
-        ).chain())
+            update_vertex_labels,
+            check_scene,
+        ))
         .run();
 }
 
@@ -79,21 +105,19 @@ fn check_file_changes(
     mut commands: Commands,
     meshes: ResMut<Assets<Mesh>>,
     materials: ResMut<Assets<StandardMaterial>>,
+    asset_server: Res<AssetServer>,
     query: Query<(Entity, &FileWatcher)>,
 ) {
     let path = std::path::Path::new(&mesh_file.0);
     if let Ok(metadata) = std::fs::metadata(path) {
         if let Ok(last_modified) = metadata.modified() {
-            // If we have an existing mesh, check if we need to update it
             if let Ok((entity, watcher)) = query.get_single() {
                 if last_modified > watcher.last_modified {
-                    // File has changed, despawn old mesh and spawn new one
                     commands.entity(entity).despawn();
-                    spawn_mesh(commands, meshes, materials, mesh_file, export_path);
+                    spawn_mesh(commands, meshes, materials, mesh_file, export_path, asset_server);
                 }
             } else {
-                // No mesh exists yet, spawn first one
-                spawn_mesh(commands, meshes, materials, mesh_file, export_path);
+                spawn_mesh(commands, meshes, materials, mesh_file, export_path, asset_server);
             }
         }
     }
@@ -101,30 +125,61 @@ fn check_file_changes(
 
 fn setup(
     mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    // Light
-    commands.spawn(PointLightBundle {
-        point_light: PointLight {
-            intensity: 1500.0,
-            shadows_enabled: true,
-            ..default()
-        },
-        transform: Transform::from_xyz(4.0, 8.0, 4.0),
-        ..default()
-    });
+    println!("Setting up scene...");
 
-    // Camera
+    // Camera with orbit controls
     commands.spawn((
         Camera3dBundle {
-            transform: Transform::from_xyz(-2.0, 2.5, 5.0).looking_at(Vec3::ZERO, Vec3::Y),
+            transform: Transform::from_xyz(0.0, 5.0, 10.0).looking_at(Vec3::ZERO, Vec3::Y),
             ..default()
         },
         OrbitCamera {
+            radius: 10.0,
             focus: Vec3::ZERO,
-            radius: 5.0,
             upside_down: false,
         },
     ));
+
+    commands.spawn(DirectionalLightBundle {
+        directional_light: DirectionalLight {
+            illuminance: 5000.0,
+            shadows_enabled: true,
+            ..default()
+        },
+        transform: Transform::from_xyz(4.0, 8.0, 4.0).looking_at(Vec3::ZERO, Vec3::Y),
+        ..default()
+    });
+
+    // Keep the red cube for reference
+    let cube = meshes.add(Mesh::from(shape::Cube::new(0.5))); // Made smaller
+    let red_material = materials.add(StandardMaterial {
+        base_color: Color::RED,
+        ..default()
+    });
+
+    commands.spawn(PbrBundle {
+        mesh: cube,
+        material: red_material,
+        transform: Transform::from_xyz(2.0, 0.0, 0.0), // Moved to the side
+        ..default()
+    });
+}
+
+// Add diagnostic system
+fn check_scene(
+    cameras: Query<&Camera3d>,
+    lights: Query<&DirectionalLight>,
+    meshes: Query<&Handle<Mesh>>,
+    materials: Query<&Handle<StandardMaterial>>,
+) {
+    println!("\nScene Diagnostic:");
+    println!("Cameras: {}", cameras.iter().count());
+    println!("Lights: {}", lights.iter().count());
+    println!("Mesh entities: {}", meshes.iter().count());
+    println!("Material entities: {}", materials.iter().count());
 }
 
 fn export_to_glb(mesh_data: &MeshData, output_path: &PathBuf) -> Result<(), Box<dyn std::error::Error>> {
@@ -320,8 +375,11 @@ fn spawn_mesh(
     mut materials: ResMut<Assets<StandardMaterial>>,
     mesh_file: Res<MeshFilePath>,
     export_path: Res<ExportPath>,
+    asset_server: Res<AssetServer>,
 ) {
     let path = std::path::Path::new(&mesh_file.0);
+    println!("Loading mesh from: {:?}", path);
+
     let last_modified = std::fs::metadata(path)
         .expect("Failed to read metadata")
         .modified()
@@ -329,9 +387,105 @@ fn spawn_mesh(
 
     // Read mesh data from file
     let mesh_json = fs::read_to_string(path)
-        .expect("Failed to read mesh file");
+        .unwrap_or_else(|e| panic!("Failed to read file {}: {}", path.display(), e));
+    
     let mesh_data: MeshData = serde_json::from_str(&mesh_json)
-        .expect("Failed to parse JSON");
+        .unwrap_or_else(|e| {
+            eprintln!("Invalid JSON content:");
+            eprintln!("{}", mesh_json);
+            panic!("Failed to parse JSON from {}: {}", path.display(), e)
+        });
+
+    println!("Loaded {} vertices and {} indices", 
+        mesh_data.vertices.len(), 
+        mesh_data.indices.len());
+
+    // Print some mesh data for debugging
+    println!("Mesh data loaded:");
+    println!("Vertices: {}", mesh_data.vertices.len());
+    println!("Indices: {}", mesh_data.indices.len());
+    println!("First few vertices: {:?}", &mesh_data.vertices[..3.min(mesh_data.vertices.len())]);
+    println!("First few indices: {:?}", &mesh_data.indices[..3.min(mesh_data.indices.len())]);
+
+    let mesh = Mesh::new(bevy::render::render_resource::PrimitiveTopology::TriangleList);
+    
+    // Create the mesh with explicit attributes
+    let mut mesh = Mesh::new(bevy::render::render_resource::PrimitiveTopology::TriangleList);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, mesh_data.vertices.clone());
+    
+    let mut normals = Vec::with_capacity(mesh_data.vertices.len());
+    for _ in 0..mesh_data.vertices.len() {
+        normals.push([0.0, 1.0, 0.0]);
+    }
+    mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
+    
+    let mut uvs = Vec::with_capacity(mesh_data.vertices.len());
+    for _ in 0..mesh_data.vertices.len() {
+        uvs.push([0.0, 0.0]);
+    }
+    mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
+    
+    mesh.set_indices(Some(bevy::render::mesh::Indices::U32(mesh_data.indices.clone())));
+
+    // Spawn the mesh with a distinct material
+    commands.spawn((
+        PbrBundle {
+            mesh: meshes.add(mesh),
+            material: materials.add(StandardMaterial {
+                base_color: Color::rgb(0.0, 0.8, 0.0),  // Green color
+                emissive: Color::rgb(0.0, 0.3, 0.0),    // Slight glow
+                metallic: 0.0,
+                perceptual_roughness: 0.2,
+                ..default()
+            }),
+            transform: Transform::from_xyz(0.0, 0.0, 0.0),
+            visibility: Visibility::Visible,
+            ..default()
+        },
+        FileWatcher {
+            last_modified,
+        },
+    ));
+
+    // Spawn vertex labels
+    for (i, vertex) in mesh_data.vertices.iter().enumerate() {
+        let label_text = if i < mesh_data.metadata.len() {
+            mesh_data.metadata[i].text.clone()
+        } else {
+            format!("Vertex {}", i)
+        };
+
+        let world_pos = Vec3::new(vertex[0], vertex[1], vertex[2]);
+
+        commands.spawn((
+            NodeBundle {
+                style: Style {
+                    position_type: PositionType::Absolute,
+                    left: Val::Px(0.0),
+                    top: Val::Px(0.0),
+                    padding: UiRect::all(Val::Px(5.0)),
+                    ..default()
+                },
+                background_color: BackgroundColor(Color::rgba(0.0, 0.0, 0.0, 0.5)),
+                visibility: Visibility::Visible,
+                ..default()
+            },
+            VertexLabel {
+                vertex_index: i,
+                world_position: world_pos,
+            },
+        ))
+        .with_children(|parent| {
+            parent.spawn(TextBundle::from_section(
+                label_text,
+                TextStyle {
+                    font_size: 16.0,
+                    color: Color::WHITE,
+                    ..default()
+                },
+            ));
+        });
+    }
 
     // Handle export if path is provided
     if let Some(export_path) = &export_path.0 {
@@ -341,47 +495,6 @@ fn spawn_mesh(
             println!("Successfully exported GLB to {:?}", export_path);
         }
     }
-
-    // Create the mesh
-    let mut mesh = Mesh::new(bevy::render::render_resource::PrimitiveTopology::TriangleList);
-    
-    // Insert mesh attributes
-    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, mesh_data.vertices.clone());
-    
-    // Calculate and insert normals
-    let mut normals = Vec::with_capacity(mesh_data.vertices.len());
-    for _ in 0..mesh_data.vertices.len() {
-        normals.push([0.0, 1.0, 0.0]);
-    }
-    mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
-    
-    // Insert UV coordinates
-    let mut uvs = Vec::with_capacity(mesh_data.vertices.len());
-    for _ in 0..mesh_data.vertices.len() {
-        uvs.push([0.0, 0.0]);
-    }
-    mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
-    
-    // Set indices
-    mesh.set_indices(Some(bevy::render::mesh::Indices::U32(mesh_data.indices.clone())));
-
-    // Spawn the mesh entity with the FileWatcher component
-    commands.spawn((
-        PbrBundle {
-            mesh: meshes.add(mesh),
-            material: materials.add(StandardMaterial {
-                base_color: Color::rgb(0.8, 0.2, 0.2),
-                metallic: 0.0,
-                perceptual_roughness: 0.8,
-                ..default()
-            }),
-            transform: Transform::from_xyz(0.0, 0.0, 0.0),
-            ..default()
-        },
-        FileWatcher {
-            last_modified,
-        },
-    ));
 }
 
 fn orbit_camera(
@@ -427,5 +540,36 @@ fn orbit_camera(
         // Update transform
         let rot_matrix = Mat3::from_quat(transform.rotation);
         transform.translation = orbit.focus + rot_matrix.mul_vec3(Vec3::new(0.0, 0.0, orbit.radius));
+    }
+}
+
+fn update_vertex_labels(
+    mut labels: Query<(&mut Style, &VertexLabel)>,
+    camera_3d: Query<(&Camera, &GlobalTransform), (With<Camera3d>, Without<Camera2d>)>,
+    windows: Query<&Window>,
+) {
+    // Get the 3D camera and window
+    let Ok((camera, camera_transform)) = camera_3d.get_single() else { return };
+    let Ok(window) = windows.get_single() else { return };
+
+    for (mut style, label) in labels.iter_mut() {
+        // Convert world position to screen position
+        if let Some(screen_pos) = camera.world_to_viewport(
+            camera_transform,
+            label.world_position
+        ) {
+            style.left = Val::Px(screen_pos.x);
+            style.top = Val::Px(screen_pos.y);
+        }
+    }
+}
+
+fn debug_mesh(
+    meshes: Query<&Handle<Mesh>>,
+) {
+    if meshes.is_empty() {
+        println!("No mesh entities found in the scene");
+    } else {
+        println!("Found {} mesh entities", meshes.iter().count());
     }
 }
