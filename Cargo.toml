@@ -4,6 +4,8 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+clap = { version = "4.4", features = ["derive"] }
+gltf = "1.4"
 bevy = "0.12.1"
 notify = "6.1"
 notify-debouncer-mini = "0.4"
