@@ -97,7 +97,6 @@ fn main() {
             check_file_changes,
             orbit_camera,
             update_vertex_labels,
-            check_scene,
         ))
         .run();
 }
@@ -171,19 +170,7 @@ fn setup(
     });
 }
 
-// Add diagnostic system
-fn check_scene(
-    cameras: Query<&Camera3d>,
-    lights: Query<&DirectionalLight>,
-    meshes: Query<&Handle<Mesh>>,
-    materials: Query<&Handle<StandardMaterial>>,
-) {
-    println!("\nScene Diagnostic:");
-    println!("Cameras: {}", cameras.iter().count());
-    println!("Lights: {}", lights.iter().count());
-    println!("Mesh entities: {}", meshes.iter().count());
-    println!("Material entities: {}", materials.iter().count());
-}
+
 
 fn export_to_glb(mesh_data: &MeshData, output_path: &PathBuf) -> Result<(), Box<dyn std::error::Error>> {
     use std::fs::File;
