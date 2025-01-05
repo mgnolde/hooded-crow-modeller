@@ -1,0 +1,17 @@
+[bones]
+
+[bones.lower_back]
+orientation = 10
+slope = 5
+rotation = 5
+length = 10
+
+[bones.mid_back]
+connection = "bones.lower_back"
+origin = "connection.destination"
+orientation = ["connection.orientation", 5]
+slope = ["connection.slope", 10]
+rotation = ["connection.rotation", 10]
+length = 10
+vertices = { a = { ratio = 0.1, distance = 10, slope = 5, rotation = 5 }, b = { ratio = 0.1, distance = 10, slope = 5, rotation = 5 }, c = { ratio = 0.1, distance = 10, slope = 5, rotation = 5 } }
+faces = { f = ["a", "b", "c"] }

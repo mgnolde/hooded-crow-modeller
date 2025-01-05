@@ -3,6 +3,7 @@ use bevy::{
     sprite::Sprite,
     text::{Text2dBundle, Text, TextStyle},
     input::mouse::{MouseWheel, MouseMotion},
+    log::LogPlugin,
 };
 use clap::Parser;
 use std::{
@@ -16,6 +17,10 @@ use gltf_json::{
     validation::USize64,
     Index,
 };
+use toml;
+use bevy::render::mesh::{Indices, Mesh};
+use bevy::render::render_resource::PrimitiveTopology;
+use serde::Deserialize;
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -31,15 +36,15 @@ struct Args {
 #[derive(serde::Deserialize)]
 struct PointsFile(String);
 
-#[derive(serde::Deserialize)]
-struct MeshData {
-    vertices: Vec<[f32; 3]>,
+#[derive(Debug, Deserialize)]
+pub struct MeshData {
+    vertices: Vec<Vec<f32>>,
     indices: Vec<u32>,
-    metadata: Vec<NodeMetadata>,
+    metadata: Vec<Metadata>,
 }
 
-#[derive(serde::Deserialize)]
-struct NodeMetadata {
+#[derive(Debug, Deserialize)]
+pub struct Metadata {
     text: String,
 }
 
@@ -74,19 +79,17 @@ struct VertexLabel {
 }
 
 fn main() {
+    // Configure logging to be less verbose
+    let mut app = App::new();
+    app.add_plugins(DefaultPlugins.set(LogPlugin {
+        filter: "error".into(),
+        level: bevy::log::Level::ERROR,
+    }));
+
     let args = Args::parse();
     let mesh_file = args.mesh_file.clone();
 
-    App::new()
-        .add_plugins(DefaultPlugins.set(WindowPlugin {
-            primary_window: Some(Window {
-                title: "3D Viewer".into(),
-                resolution: (800., 600.).into(),
-                ..default()
-            }),
-            ..default()
-        }))
-        .insert_resource(MeshFilePath(mesh_file))
+    app.insert_resource(MeshFilePath(mesh_file))
         .insert_resource(ExportPath(args.export))
         .add_systems(Startup, (setup, spawn_mesh))
         .add_systems(Update, (
@@ -378,54 +381,26 @@ fn spawn_mesh(
     asset_server: Res<AssetServer>,
 ) {
     let path = std::path::Path::new(&mesh_file.0);
-    println!("Loading mesh from: {:?}", path);
-
     let last_modified = std::fs::metadata(path)
         .expect("Failed to read metadata")
         .modified()
         .expect("Failed to get modification time");
 
-    // Read mesh data from file
-    let mesh_json = fs::read_to_string(path)
+    // Read mesh data from TOML file
+    let mesh_toml = fs::read_to_string(path)
         .unwrap_or_else(|e| panic!("Failed to read file {}: {}", path.display(), e));
     
-    let mesh_data: MeshData = serde_json::from_str(&mesh_json)
-        .unwrap_or_else(|e| {
-            eprintln!("Invalid JSON content:");
-            eprintln!("{}", mesh_json);
-            panic!("Failed to parse JSON from {}: {}", path.display(), e)
-        });
+    let mesh_data: MeshData = toml::from_str(&mesh_toml)
+        .unwrap_or_else(|e| panic!("Failed to parse TOML from {}: {}", path.display(), e));
 
-    println!("Loaded {} vertices and {} indices", 
-        mesh_data.vertices.len(), 
-        mesh_data.indices.len());
-
-    // Print some mesh data for debugging
-    println!("Mesh data loaded:");
-    println!("Vertices: {}", mesh_data.vertices.len());
-    println!("Indices: {}", mesh_data.indices.len());
-    println!("First few vertices: {:?}", &mesh_data.vertices[..3.min(mesh_data.vertices.len())]);
-    println!("First few indices: {:?}", &mesh_data.indices[..3.min(mesh_data.indices.len())]);
-
-    let mesh = Mesh::new(bevy::render::render_resource::PrimitiveTopology::TriangleList);
-    
-    // Create the mesh with explicit attributes
-    let mut mesh = Mesh::new(bevy::render::render_resource::PrimitiveTopology::TriangleList);
-    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, mesh_data.vertices.clone());
-    
-    let mut normals = Vec::with_capacity(mesh_data.vertices.len());
-    for _ in 0..mesh_data.vertices.len() {
-        normals.push([0.0, 1.0, 0.0]);
-    }
-    mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
-    
-    let mut uvs = Vec::with_capacity(mesh_data.vertices.len());
-    for _ in 0..mesh_data.vertices.len() {
-        uvs.push([0.0, 0.0]);
-    }
-    mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
-    
-    mesh.set_indices(Some(bevy::render::mesh::Indices::U32(mesh_data.indices.clone())));
+    // Convert to Bevy mesh format
+    let mut mesh = Mesh::new(PrimitiveTopology::TriangleList);
+    let positions: Vec<[f32; 3]> = mesh_data.vertices
+        .iter()
+        .map(|v| [v[0], v[1], v[2]])
+        .collect();
+    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
+    mesh.set_indices(Some(Indices::U32(mesh_data.indices.clone())));
 
     // Spawn the mesh with a distinct material
     commands.spawn((

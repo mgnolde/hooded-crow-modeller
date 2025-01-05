@@ -1,0 +1,1 @@
+cargo run --bin viewer -- mesh.json --export ${HOME}\Desktop\mesh.glb
