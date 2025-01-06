@@ -11,9 +11,9 @@ faces = { f = ["a", "b", "c"] }
 [bones.mid_back]
 connection = "bones.lower_back"
 origin = "connection.destination"
-orientation = { reference = "connection.orientation", offset = 5 }
-slope = { reference = "connection.slope", offset = 10 }
-rotation = { reference = "connection.rotation", offset = 10 }
+orientation = { reference = "connection.orientation", offset = 0 }
+slope = { reference = "connection.slope", offset = 90 }
+rotation = { reference = "connection.rotation", offset = 0 }
 length = 1
 vertices = { a = { ratio = 0.1, distance = 10, slope = 5, rotation = 5 }, b = { ratio = 0.1, distance = 10, slope = 5, rotation = 5 }, c = { ratio = 0.1, distance = 10, slope = 5, rotation = 5 } }
 faces = { f = ["a", "b", "c"] }

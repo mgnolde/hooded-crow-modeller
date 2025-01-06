@@ -67,6 +67,38 @@ struct BonePosition {
 }
 
 impl MeshData {
+    fn resolve_value(&self, value: &Value, parent_name: &str) -> f32 {
+        match value {
+            Value::Absolute(val) => *val,
+            Value::Relative { reference, offset } => {
+                // Split the reference path into parts
+                let parts: Vec<&str> = reference.split('.').collect();
+                if parts.len() != 2 {
+                    panic!("Invalid reference path: {}", reference);
+                }
+
+                // First part should be "connection"
+                if parts[0] != "connection" {
+                    panic!("Reference must start with 'connection': {}", reference);
+                }
+
+                // Get the parent bone
+                let parent = self.bones.get(parent_name)
+                    .unwrap_or_else(|| panic!("Parent bone not found: {}", parent_name));
+
+                // Get the referenced value based on the second part
+                let base_value = match parts[1] {
+                    "orientation" => self.resolve_value(&parent.orientation, parent_name),
+                    "slope" => self.resolve_value(&parent.slope, parent_name),
+                    "rotation" => self.resolve_value(&parent.rotation, parent_name),
+                    _ => panic!("Invalid reference property: {}", parts[1]),
+                };
+
+                base_value + offset
+            }
+        }
+    }
+
     fn resolve_positions(&self) -> HashMap<String, BonePosition> {
         let mut positions = HashMap::new();
         let mut last_size = 0;
@@ -109,11 +141,14 @@ impl MeshData {
             for (name, bone) in &self.bones {
                 if !positions.contains_key(name) {
                     if let Some(ref connection) = bone.connection {
-                        if let Some(parent) = positions.get(connection) {
+                        // Remove the "bones." prefix if it exists
+                        let parent_name = connection.strip_prefix("bones.").unwrap_or(connection);
+                        
+                        if let Some(parent) = positions.get(parent_name) {
                             // Calculate relative values
-                            let orientation = self.resolve_value(&bone.orientation, parent.orientation);
-                            let slope = self.resolve_value(&bone.slope, parent.slope);
-                            let rotation = self.resolve_value(&bone.rotation, parent.rotation);
+                            let orientation = self.resolve_value(&bone.orientation, parent_name);
+                            let slope = self.resolve_value(&bone.slope, parent_name);
+                            let rotation = self.resolve_value(&bone.rotation, parent_name);
 
                             // Calculate end position
                             let direction = calculate_direction(orientation, slope);
@@ -133,13 +168,6 @@ impl MeshData {
         }
 
         positions
-    }
-
-    fn resolve_value(&self, value: &Value, parent_value: f32) -> f32 {
-        match value {
-            Value::Absolute(val) => *val,
-            Value::Relative { offset, .. } => parent_value + offset,
-        }
     }
 
     fn get_vertices(&self) -> Vec<[f32; 3]> {
@@ -258,24 +286,39 @@ fn orbit_camera(
             // Manual camera control with mouse drag
             for ev in mouse_motion.iter() {
                 let rotation_speed = 0.5;
-                let mut angle_x = ev.delta.x * rotation_speed * time.delta_seconds();
-                let mut angle_y = ev.delta.y * rotation_speed * time.delta_seconds();
-                
-                // Clamp vertical rotation to prevent flipping
-                angle_y = angle_y.clamp(-1.0, 1.0);
-                angle_x = angle_x.clamp(-1.0, 1.0);
+                let angle_x = ev.delta.x * rotation_speed * time.delta_seconds();
+                let angle_y = ev.delta.y * rotation_speed * time.delta_seconds();
 
-                // Rotate around Y axis
-                transform.rotate_y(-angle_x);
+                // Get the camera's current position
+                let distance = transform.translation.length();
                 
-                // Rotate around local X axis
-                transform.rotate_local_x(-angle_y);
+                // Rotate around global Y axis first
+                transform.rotate_around(
+                    Vec3::ZERO,
+                    Quat::from_rotation_y(-angle_x),
+                );
+                
+                // Then rotate around global X axis
+                transform.rotate_around(
+                    Vec3::ZERO,
+                    Quat::from_rotation_x(-angle_y),
+                );
+                
+                // Maintain distance
+                let direction = transform.translation.normalize();
+                transform.translation = direction * distance;
+                
+                // Look at center
+                transform.look_at(Vec3::ZERO, Vec3::Y);
             }
         } else if !window.cursor.visible {
             // Automatic rotation when cursor is hidden
             let angle = time.elapsed_seconds() * 0.5;
-            transform.translation.x = angle.cos() * 5.0;
-            transform.translation.z = angle.sin() * 5.0;
+            transform.translation = Vec3::new(
+                angle.cos() * 5.0,
+                2.5,
+                angle.sin() * 5.0,
+            );
             transform.look_at(Vec3::ZERO, Vec3::Y);
         }
     }
