@@ -13,3 +13,4 @@ serde_json = "1.0"
 gltf-json = "1.4.1"
 toml = "0.7"
 serde = { version = "1.0", features = ["derive"] }
+bytemuck = "1.14"

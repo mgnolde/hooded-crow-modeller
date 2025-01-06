@@ -2071,6 +2071,7 @@ name = "hooded-crow-modeller"
 version = "0.1.0"
 dependencies = [
  "bevy",
+ "bytemuck",
  "clap",
  "gltf",
  "gltf-json",
