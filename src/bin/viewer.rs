@@ -4,6 +4,7 @@ use bevy::{
     window::PrimaryWindow,
     log::LogPlugin,
     input::mouse::MouseMotion,
+    text::Text2dBundle,
 };
 use gltf::json::{self, Index};
 use gltf_json::validation::{Checked, USize64};
@@ -86,6 +87,9 @@ struct CameraInitialized;
 
 #[derive(Component)]
 struct CleanupMarker;
+
+#[derive(Component)]
+struct LabelText;
 
 #[derive(SystemSet, Debug, Hash, PartialEq, Eq, Clone)]
 enum ViewerSystem {
@@ -250,10 +254,7 @@ fn setup(
     mut materials: ResMut<Assets<StandardMaterial>>,
     mesh_data: Res<MeshData>,
 ) {
-    println!("Starting scene setup...");
-
-    // Ensure we're in Loading state
-    commands.insert_resource(NextState(Some(ViewerState::Loading)));
+    println!("\n=== Starting scene setup ===");
 
     // Add cleanup marker to all new entities with scaled transform
     commands.spawn((
@@ -261,13 +262,13 @@ fn setup(
             mesh: meshes.add(create_mesh(&mesh_data)),
             material: materials.add(create_material()),
             transform: Transform::from_xyz(0.0, 0.0, 0.0)
-                .with_scale(Vec3::splat(5.0)), // Scale up the mesh
+                .with_scale(Vec3::splat(5.0)),
             ..default()
         },
         CleanupMarker,
     ));
 
-    // Add 3D camera with cleanup marker and specific order
+    // Add 3D camera
     commands.spawn((
         Camera3dBundle {
             transform: Transform::from_xyz(-10.0, 10.0, 20.0).looking_at(Vec3::ZERO, Vec3::Y),
@@ -280,7 +281,41 @@ fn setup(
         CleanupMarker,
     ));
 
-    // Mark scene as ready and transition to Ready state
+    // Add label quads at bone positions
+    let positions = mesh_data.resolve_positions();
+    let scale = 5.0;
+    
+    println!("\nCreating labels:");
+    for (name, position) in positions.iter() {
+        let end = position.end * scale;
+        println!("Label '{}': spawn_position={:?}", name, end);
+        
+        // Spawn the background quad
+        commands.spawn((
+            PbrBundle {
+                mesh: meshes.add(Mesh::from(shape::Quad::new(Vec2::new(2.0, 0.5)))),
+                material: materials.add(StandardMaterial {
+                    base_color: Color::rgba(0.0, 0.0, 0.0, 0.5),
+                    emissive: Color::rgba(0.0, 0.0, 0.0, 1.0),
+                    unlit: true,
+                    double_sided: true,
+                    alpha_mode: AlphaMode::Blend,
+                    ..default()
+                }),
+                transform: Transform::from_translation(end + Vec3::new(0.0, 0.5, 0.0))
+                    .with_rotation(Quat::from_rotation_y(std::f32::consts::FRAC_PI_2)),
+                visibility: Visibility::Visible,
+                ..default()
+            },
+            BoneLabel {
+                bone_name: name.clone(),
+                world_position: end + Vec3::new(0.0, 0.5, 0.0),
+            },
+            CleanupMarker,
+        ));
+    }
+
+    // Mark scene as ready
     commands.spawn((SceneReady, CleanupMarker));
     commands.insert_resource(NextState(Some(ViewerState::Ready)));
     println!("Scene setup complete");
@@ -393,36 +428,6 @@ fn setup_camera(
     // Only run if we find an uninitialized camera
     if let Ok(camera_entity) = camera_query.get_single() {
         commands.entity(camera_entity).insert(CameraInitialized);
-    }
-}
-
-fn update_bone_labels(
-    scene_ready: Query<&SceneReady>,
-    camera_ready: Query<&CameraInitialized>,
-    mut labels: Query<(&mut Style, &BoneLabel)>,
-    camera: Query<(&Camera, &GlobalTransform), (With<Camera3d>, Without<UiCamera>)>,
-    windows: Query<&Window>,
-) {
-    // Check all initialization conditions
-    if scene_ready.is_empty() || camera_ready.is_empty() {
-        return;
-    }
-
-    let (camera, camera_transform) = match camera.get_single() {
-        Ok(cam) => cam,
-        Err(_) => return,
-    };
-
-    let window = match windows.get_single() {
-        Ok(win) => win,
-        Err(_) => return,
-    };
-
-    for (mut style, label) in labels.iter_mut() {
-        if let Some(screen_pos) = camera.world_to_viewport(camera_transform, label.world_position) {
-            style.left = Val::Px(screen_pos.x);
-            style.top = Val::Px(screen_pos.y);
-        }
     }
 }
 
@@ -592,28 +597,31 @@ fn export_to_glb(mesh_data: &MeshData, export_path: &Path) -> Result<(), Box<dyn
 fn draw_debug_lines(
     mut gizmos: Gizmos,
     mesh_data: Res<MeshData>,
+    labels: Query<(&Transform, &BoneLabel)>,
 ) {
     let positions = mesh_data.resolve_positions();
-    let scale = 5.0; // Match the mesh scale
+    let scale = 5.0;
     
-    println!("Drawing debug lines:");
     for (name, position) in positions.iter() {
-        // Scale the positions
-        let start = position.start * scale;
         let end = position.end * scale;
         
-        // Draw the bone line
+        // Draw text markers at label positions
+        let size = 0.1;
         gizmos.line(
-            start,
-            end,
-            Color::YELLOW,
+            end + Vec3::new(-size, 0.5, 0.0),
+            end + Vec3::new(size, 0.5, 0.0),
+            Color::WHITE,
         );
-        
-        // Draw larger spheres at start and end for better visibility
-        gizmos.sphere(start, Quat::IDENTITY, 0.5, Color::RED);
-        gizmos.sphere(end, Quat::IDENTITY, 0.5, Color::GREEN);
-        
-        println!("Bone {}: start={:?}, end={:?}", name, start, end);
+        gizmos.line(
+            end + Vec3::new(0.0, 0.5 - size, 0.0),
+            end + Vec3::new(0.0, 0.5 + size, 0.0),
+            Color::WHITE,
+        );
+        gizmos.line(
+            end + Vec3::new(0.0, 0.5, -size),
+            end + Vec3::new(0.0, 0.5, size),
+            Color::WHITE,
+        );
     }
 }
 
@@ -633,6 +641,19 @@ fn create_material() -> StandardMaterial {
         unlit: true,
         double_sided: true,  // Add this to make lines visible from both sides
         ..default()
+    }
+}
+
+fn update_labels(
+    mut labels: Query<(&mut Transform, &BoneLabel)>,
+    camera: Query<&GlobalTransform, With<Camera3d>>,
+) {
+    let Ok(camera_transform) = camera.get_single() else { return };
+
+    for (mut label_transform, _) in labels.iter_mut() {
+        let to_camera = camera_transform.translation() - label_transform.translation;
+        let angle = f32::atan2(to_camera.x, to_camera.z);
+        label_transform.rotation = Quat::from_rotation_y(angle);
     }
 }
 
@@ -663,6 +684,7 @@ fn main() {
         .add_systems(Update, (
             setup_camera.before(ViewerSystem::Camera),
             orbit_camera.in_set(ViewerSystem::Camera),
+            update_labels.after(ViewerSystem::Camera),
             draw_debug_lines,
         ))
         // Only run cleanup when file changes
