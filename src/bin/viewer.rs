@@ -72,6 +72,34 @@ struct BoneLabel {
     world_position: Vec3,
 }
 
+#[derive(Component)]
+struct UiCamera;
+
+#[derive(Component)]
+struct UiRoot;
+
+#[derive(Component)]
+struct SceneReady;
+
+#[derive(Component)]
+struct CameraInitialized;
+
+#[derive(Component)]
+struct CleanupMarker;
+
+#[derive(SystemSet, Debug, Hash, PartialEq, Eq, Clone)]
+enum ViewerSystem {
+    Camera,
+    Labels,
+}
+
+#[derive(States, Debug, Clone, Copy, Eq, PartialEq, Hash, Default)]
+enum ViewerState {
+    #[default]
+    Loading,
+    Ready,
+}
+
 impl MeshData {
     fn resolve_value(&self, value: &Value, parent_name: &str) -> f32 {
         match value {
@@ -222,117 +250,68 @@ fn setup(
     mut materials: ResMut<Assets<StandardMaterial>>,
     mesh_data: Res<MeshData>,
 ) {
-    println!("Setting up scene...");
+    println!("Starting scene setup...");
 
-    // Create the mesh
-    let mut mesh = Mesh::new(PrimitiveTopology::LineList);
+    // Ensure we're in Loading state
+    commands.insert_resource(NextState(Some(ViewerState::Loading)));
 
-    // Get vertices and indices
-    let vertices = mesh_data.get_vertices();
-    println!("Vertices: {:?}", vertices);  // Debug print
-    let indices = mesh_data.get_indices();
-    println!("Indices: {:?}", indices);    // Debug print
-
-    // Set vertex positions
-    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, vertices.clone());
-    
-    // Set indices
-    mesh.set_indices(Some(Indices::U32(indices)));
-
-    // Add some debug normals (might help with visibility)
-    let normals: Vec<[f32; 3]> = vertices.iter().map(|_| [0.0, 1.0, 0.0]).collect();
-    mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
-
-    // Spawn the mesh with a more visible material
-    commands.spawn(PbrBundle {
-        mesh: meshes.add(mesh),
-        material: materials.add(StandardMaterial {
-            base_color: Color::rgb(1.0, 1.0, 1.0),  // White color
-            emissive: Color::rgb(0.5, 0.5, 0.5),    // Make it glow a bit
-            metallic: 0.0,
-            perceptual_roughness: 0.0,
-            double_sided: true,
-            unlit: true,
-            ..default()
-        }),
-        transform: Transform::from_xyz(0.0, 0.0, 0.0),
-        ..default()
-    });
-
-    // Add a light
-    commands.spawn(PointLightBundle {
-        point_light: PointLight {
-            intensity: 1500.0,
-            shadows_enabled: true,
+    // Add cleanup marker to all new entities with scaled transform
+    commands.spawn((
+        PbrBundle {
+            mesh: meshes.add(create_mesh(&mesh_data)),
+            material: materials.add(create_material()),
+            transform: Transform::from_xyz(0.0, 0.0, 0.0)
+                .with_scale(Vec3::splat(5.0)), // Scale up the mesh
             ..default()
         },
-        transform: Transform::from_xyz(4.0, 8.0, 4.0),
-        ..default()
-    });
+        CleanupMarker,
+    ));
 
-    // Add a camera
-    commands.spawn(Camera3dBundle {
-        transform: Transform::from_xyz(-2.0, 2.5, 5.0).looking_at(Vec3::ZERO, Vec3::Y),
-        ..default()
-    });
-
-    // Add UI camera
-    commands.spawn(Camera2dBundle::default());
-
-    // Create a UI root node
-    commands
-        .spawn(NodeBundle {
-            style: Style {
-                width: Val::Percent(100.0),
-                height: Val::Percent(100.0),
+    // Add 3D camera with cleanup marker and specific order
+    commands.spawn((
+        Camera3dBundle {
+            transform: Transform::from_xyz(-10.0, 10.0, 20.0).looking_at(Vec3::ZERO, Vec3::Y),
+            camera: Camera {
+                order: 0,
                 ..default()
             },
             ..default()
-        })
-        .with_children(|parent| {
-            // Add labels for each bone
-            let positions = mesh_data.resolve_positions();
-            for (name, position) in positions.iter() {
-                parent.spawn((
-                    NodeBundle {
-                        style: Style {
-                            position_type: PositionType::Absolute,
-                            left: Val::Px(100.0),
-                            top: Val::Px(100.0),
-                            padding: UiRect::all(Val::Px(5.0)),
-                            ..default()
-                        },
-                        background_color: BackgroundColor(Color::rgba(0.0, 0.0, 0.0, 0.5)),
-                        ..default()
-                    },
-                    BoneLabel {
-                        bone_name: name.clone(),
-                        world_position: position.end,
-                    },
-                ))
-                .with_children(|label_parent| {
-                    label_parent.spawn(TextBundle::from_section(
-                        name.clone(),
-                        TextStyle {
-                            font_size: 24.0,
-                            color: Color::WHITE,
-                            ..default()
-                        },
-                    ));
-                });
-            }
-        });
+        },
+        CleanupMarker,
+    ));
+
+    // Mark scene as ready and transition to Ready state
+    commands.spawn((SceneReady, CleanupMarker));
+    commands.insert_resource(NextState(Some(ViewerState::Ready)));
+    println!("Scene setup complete");
+}
+
+fn cleanup_scene(
+    mut commands: Commands,
+    to_cleanup: Query<Entity, With<CleanupMarker>>,
+) {
+    println!("Cleaning up scene...");
+    for entity in to_cleanup.iter() {
+        commands.entity(entity).despawn_recursive();
+    }
+    commands.insert_resource(NextState(Some(ViewerState::Loading)));
+    println!("Scene cleanup complete");
 }
 
 fn check_file_changes(
+    mut commands: Commands,
     mut file_watcher: ResMut<FileWatcherResource>,
     mesh_file: Res<MeshFile>,
     export_path: Res<ExportPath>,
+    to_cleanup: Query<Entity, With<CleanupMarker>>,
 ) {
     if let Ok(metadata) = std::fs::metadata(&file_watcher.path) {
         if let Ok(modified) = metadata.modified() {
             if modified > file_watcher.last_modified {
-                println!("File changed, reloading...");
+                println!("File changed, cleaning up scene...");
+                cleanup_scene(commands, to_cleanup);
+                
+                println!("Reloading...");
                 file_watcher.last_modified = modified;
 
                 // Read and parse the TOML file
@@ -351,7 +330,7 @@ fn check_file_changes(
 
 fn orbit_camera(
     time: Res<Time>,
-    mut query: Query<&mut Transform, With<Camera>>,
+    mut query: Query<&mut Transform, (With<Camera3d>, Without<UiCamera>)>,
     window_query: Query<&Window, With<PrimaryWindow>>,
     mouse_button: Res<Input<MouseButton>>,
     mut mouse_motion: EventReader<MouseMotion>,
@@ -361,7 +340,7 @@ fn orbit_camera(
     for mut transform in query.iter_mut() {
         if mouse_button.pressed(MouseButton::Left) {
             // Manual camera control with mouse drag
-            for ev in mouse_motion.iter() {
+            for ev in mouse_motion.read() {
                 let rotation_speed = 0.5;
                 let angle_x = ev.delta.x * rotation_speed * time.delta_seconds();
                 let angle_y = ev.delta.y * rotation_speed * time.delta_seconds();
@@ -392,20 +371,43 @@ fn orbit_camera(
             // Automatic rotation when cursor is hidden
             let angle = time.elapsed_seconds() * 0.5;
             transform.translation = Vec3::new(
-                angle.cos() * 5.0,
-                2.5,
-                angle.sin() * 5.0,
+                angle.cos() * 20.0,  // Increased orbit radius
+                10.0,                // Increased height
+                angle.sin() * 20.0,  // Increased orbit radius
             );
             transform.look_at(Vec3::ZERO, Vec3::Y);
         }
     }
 }
 
+fn setup_camera(
+    mut commands: Commands,
+    scene_ready: Query<&SceneReady>,
+    camera_query: Query<Entity, (With<Camera3d>, Without<CameraInitialized>)>,
+) {
+    // Only proceed if the scene is ready
+    if scene_ready.is_empty() {
+        return;
+    }
+
+    // Only run if we find an uninitialized camera
+    if let Ok(camera_entity) = camera_query.get_single() {
+        commands.entity(camera_entity).insert(CameraInitialized);
+    }
+}
+
 fn update_bone_labels(
+    scene_ready: Query<&SceneReady>,
+    camera_ready: Query<&CameraInitialized>,
     mut labels: Query<(&mut Style, &BoneLabel)>,
-    camera: Query<(&Camera, &GlobalTransform), With<Camera3d>>,
+    camera: Query<(&Camera, &GlobalTransform), (With<Camera3d>, Without<UiCamera>)>,
     windows: Query<&Window>,
 ) {
+    // Check all initialization conditions
+    if scene_ready.is_empty() || camera_ready.is_empty() {
+        return;
+    }
+
     let (camera, camera_transform) = match camera.get_single() {
         Ok(cam) => cam,
         Err(_) => return,
@@ -418,14 +420,6 @@ fn update_bone_labels(
 
     for (mut style, label) in labels.iter_mut() {
         if let Some(screen_pos) = camera.world_to_viewport(camera_transform, label.world_position) {
-            // Add some debug printing
-            println!(
-                "Label '{}' screen position: ({}, {})", 
-                label.bone_name, 
-                screen_pos.x, 
-                screen_pos.y
-            );
-            
             style.left = Val::Px(screen_pos.x);
             style.top = Val::Px(screen_pos.y);
         }
@@ -600,18 +594,45 @@ fn draw_debug_lines(
     mesh_data: Res<MeshData>,
 ) {
     let positions = mesh_data.resolve_positions();
+    let scale = 5.0; // Match the mesh scale
     
-    for (_name, position) in positions.iter() {
+    println!("Drawing debug lines:");
+    for (name, position) in positions.iter() {
+        // Scale the positions
+        let start = position.start * scale;
+        let end = position.end * scale;
+        
         // Draw the bone line
         gizmos.line(
-            position.start,
-            position.end,
+            start,
+            end,
             Color::YELLOW,
         );
         
-        // Draw points at start and end for visibility
-        gizmos.sphere(position.start, Quat::IDENTITY, 0.1, Color::RED);
-        gizmos.sphere(position.end, Quat::IDENTITY, 0.1, Color::GREEN);
+        // Draw larger spheres at start and end for better visibility
+        gizmos.sphere(start, Quat::IDENTITY, 0.5, Color::RED);
+        gizmos.sphere(end, Quat::IDENTITY, 0.5, Color::GREEN);
+        
+        println!("Bone {}: start={:?}, end={:?}", name, start, end);
+    }
+}
+
+fn create_mesh(mesh_data: &MeshData) -> Mesh {
+    let mut mesh = Mesh::new(PrimitiveTopology::LineList);
+    let vertices = mesh_data.get_vertices();
+    let indices = mesh_data.get_indices();
+    
+    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, vertices);
+    mesh.set_indices(Some(Indices::U32(indices)));
+    mesh
+}
+
+fn create_material() -> StandardMaterial {
+    StandardMaterial {
+        base_color: Color::YELLOW,
+        unlit: true,
+        double_sided: true,  // Add this to make lines visible from both sides
+        ..default()
     }
 }
 
@@ -630,20 +651,28 @@ fn main() {
 
     App::new()
         .add_plugins(DefaultPlugins.set(LogPlugin {
-            filter: "error".into(),
-            level: bevy::log::Level::ERROR,
+            filter: "info,wgpu_core=warn,wgpu_hal=warn".into(),
+            level: bevy::log::Level::INFO,
         }))
+        .add_state::<ViewerState>()
+        .configure_sets(Update, (
+            ViewerSystem::Camera,
+            ViewerSystem::Labels,
+        ).chain())
+        .add_systems(Startup, setup)
+        .add_systems(Update, (
+            setup_camera.before(ViewerSystem::Camera),
+            orbit_camera.in_set(ViewerSystem::Camera),
+            draw_debug_lines,
+        ))
+        // Only run cleanup when file changes
+        .add_systems(Update, (
+            check_file_changes,
+            bevy::window::close_on_esc,
+        ))
         .insert_resource(FileWatcherResource::new(PathBuf::from(mesh_file)))
         .insert_resource(ExportPath(PathBuf::from(export_path)))
         .insert_resource(mesh_data)
         .insert_resource(MeshFile(PathBuf::from(mesh_file)))
-        .add_systems(Startup, setup)
-        .add_systems(Update, (
-            bevy::window::close_on_esc,
-            check_file_changes,
-            orbit_camera,
-            update_bone_labels,
-            draw_debug_lines,
-        ).chain())
         .run();
 }
