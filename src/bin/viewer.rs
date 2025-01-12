@@ -66,6 +66,12 @@ struct BonePosition {
     rotation: f32,
 }
 
+#[derive(Component)]
+struct BoneLabel {
+    bone_name: String,
+    world_position: Vec3,
+}
+
 impl MeshData {
     fn resolve_value(&self, value: &Value, parent_name: &str) -> f32 {
         match value {
@@ -174,10 +180,13 @@ impl MeshData {
         let positions = self.resolve_positions();
         let mut vertices = Vec::new();
 
-        for position in positions.values() {
+        println!("Resolved positions:");
+        for (name, position) in positions.iter() {
+            println!("Bone {}: start={:?}, end={:?}", name, position.start, position.end);
             vertices.push(position.start.into());
             vertices.push(position.end.into());
         }
+        println!("Final vertices: {:?}", vertices);
 
         vertices
     }
@@ -187,11 +196,14 @@ impl MeshData {
         let mut indices = Vec::new();
         let mut current_index = 0;
 
+        println!("Creating indices:");
         for _ in positions.values() {
             indices.push(current_index);
             indices.push(current_index + 1);
+            println!("Added line: {} -> {}", current_index, current_index + 1);
             current_index += 2;
         }
+        println!("Final indices: {:?}", indices);
 
         indices
     }
@@ -210,21 +222,39 @@ fn setup(
     mut materials: ResMut<Assets<StandardMaterial>>,
     mesh_data: Res<MeshData>,
 ) {
+    println!("Setting up scene...");
+
     // Create the mesh
     let mut mesh = Mesh::new(PrimitiveTopology::LineList);
 
-    // Set vertex positions
+    // Get vertices and indices
     let vertices = mesh_data.get_vertices();
-    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, vertices);
-
-    // Set indices
+    println!("Vertices: {:?}", vertices);  // Debug print
     let indices = mesh_data.get_indices();
+    println!("Indices: {:?}", indices);    // Debug print
+
+    // Set vertex positions
+    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, vertices.clone());
+    
+    // Set indices
     mesh.set_indices(Some(Indices::U32(indices)));
 
-    // Spawn the mesh
+    // Add some debug normals (might help with visibility)
+    let normals: Vec<[f32; 3]> = vertices.iter().map(|_| [0.0, 1.0, 0.0]).collect();
+    mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
+
+    // Spawn the mesh with a more visible material
     commands.spawn(PbrBundle {
         mesh: meshes.add(mesh),
-        material: materials.add(Color::rgb(0.8, 0.7, 0.6).into()),
+        material: materials.add(StandardMaterial {
+            base_color: Color::rgb(1.0, 1.0, 1.0),  // White color
+            emissive: Color::rgb(0.5, 0.5, 0.5),    // Make it glow a bit
+            metallic: 0.0,
+            perceptual_roughness: 0.0,
+            double_sided: true,
+            unlit: true,
+            ..default()
+        }),
         transform: Transform::from_xyz(0.0, 0.0, 0.0),
         ..default()
     });
@@ -245,6 +275,53 @@ fn setup(
         transform: Transform::from_xyz(-2.0, 2.5, 5.0).looking_at(Vec3::ZERO, Vec3::Y),
         ..default()
     });
+
+    // Add UI camera
+    commands.spawn(Camera2dBundle::default());
+
+    // Create a UI root node
+    commands
+        .spawn(NodeBundle {
+            style: Style {
+                width: Val::Percent(100.0),
+                height: Val::Percent(100.0),
+                ..default()
+            },
+            ..default()
+        })
+        .with_children(|parent| {
+            // Add labels for each bone
+            let positions = mesh_data.resolve_positions();
+            for (name, position) in positions.iter() {
+                parent.spawn((
+                    NodeBundle {
+                        style: Style {
+                            position_type: PositionType::Absolute,
+                            left: Val::Px(100.0),
+                            top: Val::Px(100.0),
+                            padding: UiRect::all(Val::Px(5.0)),
+                            ..default()
+                        },
+                        background_color: BackgroundColor(Color::rgba(0.0, 0.0, 0.0, 0.5)),
+                        ..default()
+                    },
+                    BoneLabel {
+                        bone_name: name.clone(),
+                        world_position: position.end,
+                    },
+                ))
+                .with_children(|label_parent| {
+                    label_parent.spawn(TextBundle::from_section(
+                        name.clone(),
+                        TextStyle {
+                            font_size: 24.0,
+                            color: Color::WHITE,
+                            ..default()
+                        },
+                    ));
+                });
+            }
+        });
 }
 
 fn check_file_changes(
@@ -324,30 +401,34 @@ fn orbit_camera(
     }
 }
 
-fn update_vertex_labels(
-    mut gizmos: Gizmos,
-    mesh_data: Res<MeshData>,
+fn update_bone_labels(
+    mut labels: Query<(&mut Style, &BoneLabel)>,
+    camera: Query<(&Camera, &GlobalTransform), With<Camera3d>>,
+    windows: Query<&Window>,
 ) {
-    let positions = mesh_data.resolve_positions();
-    
-    for (_name, position) in positions.iter() {
-        // Draw a small cross at each bone end point
-        let size = 0.1;
-        gizmos.line(
-            position.end + Vec3::new(-size, 0.0, 0.0),
-            position.end + Vec3::new(size, 0.0, 0.0),
-            Color::WHITE,
-        );
-        gizmos.line(
-            position.end + Vec3::new(0.0, -size, 0.0),
-            position.end + Vec3::new(0.0, size, 0.0),
-            Color::WHITE,
-        );
-        gizmos.line(
-            position.end + Vec3::new(0.0, 0.0, -size),
-            position.end + Vec3::new(0.0, 0.0, size),
-            Color::WHITE,
-        );
+    let (camera, camera_transform) = match camera.get_single() {
+        Ok(cam) => cam,
+        Err(_) => return,
+    };
+
+    let window = match windows.get_single() {
+        Ok(win) => win,
+        Err(_) => return,
+    };
+
+    for (mut style, label) in labels.iter_mut() {
+        if let Some(screen_pos) = camera.world_to_viewport(camera_transform, label.world_position) {
+            // Add some debug printing
+            println!(
+                "Label '{}' screen position: ({}, {})", 
+                label.bone_name, 
+                screen_pos.x, 
+                screen_pos.y
+            );
+            
+            style.left = Val::Px(screen_pos.x);
+            style.top = Val::Px(screen_pos.y);
+        }
     }
 }
 
@@ -514,6 +595,26 @@ fn export_to_glb(mesh_data: &MeshData, export_path: &Path) -> Result<(), Box<dyn
     Ok(())
 }
 
+fn draw_debug_lines(
+    mut gizmos: Gizmos,
+    mesh_data: Res<MeshData>,
+) {
+    let positions = mesh_data.resolve_positions();
+    
+    for (_name, position) in positions.iter() {
+        // Draw the bone line
+        gizmos.line(
+            position.start,
+            position.end,
+            Color::YELLOW,
+        );
+        
+        // Draw points at start and end for visibility
+        gizmos.sphere(position.start, Quat::IDENTITY, 0.1, Color::RED);
+        gizmos.sphere(position.end, Quat::IDENTITY, 0.1, Color::GREEN);
+    }
+}
+
 fn main() {
     // Get command line arguments
     let args: Vec<String> = std::env::args().collect();
@@ -539,9 +640,10 @@ fn main() {
         .add_systems(Startup, setup)
         .add_systems(Update, (
             bevy::window::close_on_esc,
-            check_file_changes.after(bevy::window::close_on_esc),
-            orbit_camera.after(check_file_changes),
-            update_vertex_labels.after(orbit_camera),
-        ))
+            check_file_changes,
+            orbit_camera,
+            update_bone_labels,
+            draw_debug_lines,
+        ).chain())
         .run();
 }
