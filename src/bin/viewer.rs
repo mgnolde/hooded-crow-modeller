@@ -277,7 +277,7 @@ fn setup(
 ) {
     println!("\n=== Starting scene setup ===");
 
-    // Add cleanup marker to all new entities with scaled transform
+    // Add bones
     commands.spawn((
         PbrBundle {
             mesh: meshes.add(create_mesh(&mesh_data)),
@@ -588,7 +588,9 @@ fn draw_labels(
     let scale = 5.0;
 
     for (name, position) in positions.iter() {
-        let world_pos = position.end * scale + Vec3::new(0.0, 0.5, 0.0);
+        // Calculate middle point of the bone
+        let middle_pos = (position.start + position.end) * 0.5;  // Average of start and end
+        let world_pos = middle_pos * scale + Vec3::new(0.0, 0.5, 0.0);
         
         if let Some(screen_pos) = camera.world_to_viewport(camera_transform, world_pos) {
             let painter = ctx.layer_painter(egui::LayerId::new(
@@ -624,9 +626,27 @@ fn create_mesh(mesh_data: &MeshData) -> Mesh {
 
 fn create_material() -> StandardMaterial {
     StandardMaterial {
-        base_color: Color::WHITE,
+        base_color: Color::YELLOW,
         unlit: true,
         ..default()
+    }
+}
+
+// Add new system for drawing joint spheres
+fn draw_joints(
+    mesh_data: Res<MeshData>,
+    mut gizmos: Gizmos,
+) {
+    let positions = mesh_data.resolve_positions();
+    let scale = 5.0;
+
+    for position in positions.values() {
+        gizmos.sphere(
+            position.start * scale, // Position
+            Quat::IDENTITY,        // Rotation
+            0.25,                  // Radius reduced to 25% (from 1.0 to 0.25)
+            Color::RED,            // Color
+        );
     }
 }
 
@@ -658,6 +678,7 @@ fn main() {
             setup_camera,
             orbit_camera,
             draw_labels,
+            draw_joints,
             check_file_changes,
         ))
         .run();
