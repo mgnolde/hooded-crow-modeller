@@ -6,25 +6,27 @@ use bevy::{
         render_asset::RenderAssetUsages,
     },
     window::PrimaryWindow,
-    input::mouse::MouseMotion,
-    math::primitives::Rectangle,
 };
-use gltf::json::{self, Index};
-use gltf_json::validation::{Checked, USize64};
+use bevy_egui::{egui, EguiPlugin, EguiContexts};
+use gltf_json::{
+    self as json,
+    validation::{Checked, USize64},
+    Index,
+    accessor,
+    mesh,
+    Accessor,
+    Buffer,
+    Node,
+    Scene,
+    Root,
+};
+use std::{
+    collections::{BTreeMap, HashMap},
+    path::{PathBuf, Path},
+    time::SystemTime,
+};
 use serde::Deserialize;
-use std::collections::{BTreeMap, HashMap};
-use std::path::{Path, PathBuf};
-use std::time::SystemTime;
-use bevy_egui::{
-    egui,
-    egui::{
-        FontFamily::Proportional,
-        FontId,
-        TextStyle::{Body, Button, Heading},
-    },
-    EguiContexts,
-    EguiPlugin,
-};
+use bevy::input::mouse::MouseMotion;
 
 #[derive(Resource)]
 struct FileWatcherResource {
@@ -199,7 +201,7 @@ impl MeshData {
                 if !positions.contains_key(name) {
                     if let Some(ref connection) = bone.connection {
                         // Remove the "bones." prefix if it exists
-                        let parent_name = connection.strip_prefix("bones.").unwrap_or(connection);
+                        let parent_name: &str = connection.strip_prefix("bones.").unwrap_or(connection);
                         
                         if let Some(parent) = positions.get(parent_name) {
                             // Calculate relative values
@@ -295,57 +297,6 @@ fn setup(
         },
         CleanupMarker,
     ));
-
-    // Add label quads at bone positions
-    let positions = mesh_data.resolve_positions();
-    let scale = 5.0;
-    
-    println!("\nCreating labels:");
-    for (name, position) in positions.iter() {
-        let end = position.end * scale;
-        println!("Label '{}': spawn_position={:?}", name, end);
-        
-        // Spawn the background quad
-        commands.spawn((
-            PbrBundle {
-                mesh: meshes.add(Mesh::from(Rectangle::new(2.0, 0.5))),
-                material: materials.add(StandardMaterial {
-                    base_color: Color::rgba(0.0, 0.0, 0.0, 0.5),
-                    emissive: Color::rgba(0.0, 0.0, 0.0, 1.0),
-                    unlit: true,
-                    double_sided: true,
-                    alpha_mode: AlphaMode::Blend,
-                    ..default()
-                }),
-                transform: Transform::from_translation(end + Vec3::new(0.0, 0.5, 0.0))
-                    .with_rotation(Quat::from_rotation_y(std::f32::consts::FRAC_PI_2)),
-                visibility: Visibility::Visible,
-                ..default()
-            },
-            BoneLabel {
-                bone_name: name.clone(),
-                world_position: end + Vec3::new(0.0, 0.5, 0.0),
-            },
-            CleanupMarker,
-        ));
-
-        // Add text (using default font)
-        commands.spawn((
-            Text2dBundle {
-                text: Text::from_section(
-                    name.clone(),
-                    TextStyle {
-                        font_size: 24.0,
-                        color: Color::WHITE,
-                        ..default()
-                    },
-                ),
-                transform: Transform::from_translation(end + Vec3::new(0.0, 0.7, 0.0)),
-                ..default()
-            },
-            CleanupMarker,
-        ));
-    }
 
     // Mark scene as ready
     commands.spawn((SceneReady, CleanupMarker));
@@ -626,166 +577,7 @@ fn export_to_glb(mesh_data: &MeshData, export_path: &Path) -> Result<(), Box<dyn
     Ok(())
 }
 
-fn draw_line_character(gizmos: &mut Gizmos, pos: Vec3, character: char, size: f32, color: Color) {
-    println!("Drawing character: {} at position: {:?}", character, pos);
-    
-    // Define segments as relative coordinates
-    let segments = match character.to_ascii_lowercase() {
-        // Numbers
-        '0' => vec![
-            ((-1.0, 1.0), (1.0, 1.0)),   // top
-            ((1.0, 1.0), (1.0, -1.0)),   // right
-            ((1.0, -1.0), (-1.0, -1.0)), // bottom
-            ((-1.0, -1.0), (-1.0, 1.0)), // left
-        ],
-        '1' => vec![
-            ((0.0, 1.0), (0.0, -1.0)),
-        ],
-        // Letters
-        'm' => vec![
-            ((-1.0, -1.0), (-1.0, 1.0)),  // left vertical
-            ((-1.0, 1.0), (0.0, 0.0)),    // diagonal left
-            ((0.0, 0.0), (1.0, 1.0)),     // diagonal right
-            ((1.0, 1.0), (1.0, -1.0)),    // right vertical
-        ],
-        'l' => vec![
-            ((-1.0, 1.0), (-1.0, -1.0)),  // vertical
-            ((-1.0, -1.0), (1.0, -1.0)),  // bottom
-        ],
-        'b' => vec![
-            ((-1.0, 1.0), (-1.0, -1.0)),  // vertical
-            ((-1.0, -1.0), (1.0, -1.0)),  // bottom
-            ((1.0, -1.0), (1.0, 0.0)),    // right
-            ((1.0, 0.0), (-1.0, 0.0)),    // middle
-        ],
-        'k' => vec![
-            ((-1.0, 1.0), (-1.0, -1.0)),  // vertical
-            ((-1.0, 0.0), (1.0, 1.0)),    // upper diagonal
-            ((-1.0, 0.0), (1.0, -1.0)),   // lower diagonal
-        ],
-        'c' => vec![
-            ((1.0, 1.0), (-1.0, 1.0)),    // top
-            ((-1.0, 1.0), (-1.0, -1.0)),  // left
-            ((-1.0, -1.0), (1.0, -1.0)),  // bottom
-        ],
-        _ => {
-            println!("Unknown character: {}", character);
-            vec![]
-        },
-    };
-
-    // Draw each segment
-    for (start, end) in segments {
-        let start_pos = pos + Vec3::new(start.0 * size, start.1 * size, 0.0);
-        let end_pos = pos + Vec3::new(end.0 * size, end.1 * size, 0.0);
-        println!("Drawing line from {:?} to {:?}", start_pos, end_pos);
-        gizmos.line(start_pos, end_pos, color);
-    }
-}
-
-fn draw_line_text(gizmos: &mut Gizmos, pos: Vec3, text: &str, size: f32, color: Color) {
-    let char_spacing = size * 2.5; // Space between characters
-    for (i, c) in text.chars().enumerate() {
-        let char_pos = pos + Vec3::new(i as f32 * char_spacing, 0.0, 0.0);
-        draw_line_character(gizmos, char_pos, c, size, color);
-    }
-}
-
-fn draw_debug_lines(
-    mut gizmos: Gizmos,
-    mesh_data: Res<MeshData>,
-) {
-    let positions = mesh_data.resolve_positions();
-    let scale = 5.0;
-    
-    for (name, position) in positions.iter() {
-        let end = position.end * scale;
-        let text_pos = end + Vec3::new(0.0, 0.5, 0.0);
-        
-        // Draw crosses at label positions
-        let size = 0.1;
-        gizmos.line(
-            text_pos + Vec3::new(-size, 0.0, 0.0),
-            text_pos + Vec3::new(size, 0.0, 0.0),
-            Color::WHITE,
-        );
-        gizmos.line(
-            text_pos + Vec3::new(0.0, -size, 0.0),
-            text_pos + Vec3::new(0.0, size, 0.0),
-            Color::WHITE,
-        );
-        gizmos.line(
-            text_pos + Vec3::new(0.0, 0.0, -size),
-            text_pos + Vec3::new(0.0, 0.0, size),
-            Color::WHITE,
-        );
-
-        // Draw text using line segments
-        draw_line_text(
-            &mut gizmos, 
-            text_pos + Vec3::new(0.2, 0.2, 0.0),  // Adjusted offset
-            name,  // Draw the entire name instead of just first character
-            0.15,  // Size
-            Color::RED,
-        );
-    }
-}
-
-fn update_text_positions(
-    mut text_query: Query<(&mut Style, &BoneText)>,
-    camera_query: Query<(&Camera, &GlobalTransform), With<Camera3d>>,
-    windows: Query<&Window>,
-) {
-    let (camera, camera_transform) = camera_query.single();
-    let window = windows.single();
-
-    for (mut style, bone_text) in text_query.iter_mut() {
-        if let Some(screen_pos) = camera.world_to_viewport(camera_transform, bone_text.position) {
-            // Center the text on the screen position using fixed offsets
-            style.left = Val::Px(screen_pos.x - 50.0); // Half of width (100px)
-            style.top = Val::Px(screen_pos.y - 15.0);  // Half of height (30px)
-            
-            // Only show if in front of camera and within window bounds
-            let view_pos = camera_transform.compute_matrix() * bone_text.position.extend(1.0);
-            let in_front = view_pos.z < 0.0;
-            let in_bounds = screen_pos.x >= 0.0 
-                && screen_pos.x <= window.width()
-                && screen_pos.y >= 0.0 
-                && screen_pos.y <= window.height();
-            
-            style.display = if in_front && in_bounds {
-                Display::Flex
-            } else {
-                Display::None
-            };
-        }
-    }
-}
-
-fn create_mesh(mesh_data: &MeshData) -> Mesh {
-    let mut mesh = Mesh::new(PrimitiveTopology::LineList, RenderAssetUsages::RENDER_WORLD);
-    
-    // Set vertex positions
-    let vertices = mesh_data.get_vertices();
-    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, vertices);
-
-    // Set indices
-    let indices = mesh_data.get_indices();
-    mesh.insert_indices(Indices::U32(indices));
-
-    mesh
-}
-
-fn create_material() -> StandardMaterial {
-    StandardMaterial {
-        base_color: Color::YELLOW,
-        unlit: true,
-        double_sided: true,  // Add this to make lines visible from both sides
-        ..default()
-    }
-}
-
-pub fn draw_labels(
+fn draw_labels(
     mut contexts: EguiContexts,
     mesh_data: Res<MeshData>,
     camera_query: Query<(&Camera, &GlobalTransform), With<Camera3d>>,
@@ -812,6 +604,29 @@ pub fn draw_labels(
                 egui::Color32::WHITE,
             );
         }
+    }
+}
+
+fn create_mesh(mesh_data: &MeshData) -> Mesh {
+    let mut mesh = Mesh::new(
+        PrimitiveTopology::LineList,
+        RenderAssetUsages::RENDER_WORLD,
+    );
+    
+    let vertices = mesh_data.get_vertices();
+    let indices = mesh_data.get_indices();
+    
+    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, vertices);
+    mesh.insert_indices(Indices::U32(indices));
+    
+    mesh
+}
+
+fn create_material() -> StandardMaterial {
+    StandardMaterial {
+        base_color: Color::WHITE,
+        unlit: true,
+        ..default()
     }
 }
 
@@ -842,7 +657,6 @@ fn main() {
         .add_systems(Update, (
             setup_camera,
             orbit_camera,
-            draw_debug_lines,
             draw_labels,
             check_file_changes,
         ))
