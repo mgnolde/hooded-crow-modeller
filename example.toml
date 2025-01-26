@@ -1,21 +1,21 @@
-[body.torso]
+[body]
+[body.head]
 bones = [
-    { name = "body.torso.chest", parent = "body.spine.chest_upper", orientation = 0, slope = 0, rotation = 0, length = 0.3 }
+    { name = "body.head.head", parent = "body.head.neck", orientation = 0, slope = 0, rotation = 0, length = 0.2 },
+    { name = "body.head.neck", parent = "body.torso.spine.chest", orientation = 0, slope = 0, rotation = 0, length = 0.1 }
 ]
 
-[body.spine]
+[body.torso]
 bones = [
-    { name = "body.spine.lower", parent = "", orientation = 0, slope = 0, rotation = 0, length = 0.3 },
-    { name = "body.spine.intermediate_lower", parent = "body.spine.lower", orientation = 0, slope = 0, rotation = 0, length = 0.3 },
-    { name = "body.spine.intermediate_upper", parent = "body.spine.intermediate_lower", orientation = 0, slope = 0, rotation = 0, length = 0.3 },
-    { name = "body.spine.chest_upper", parent = "body.spine.intermediate_upper", orientation = 0, slope = 0, rotation = 0, length = 0.3 },
-    { name = "body.spine.neck", parent = "body.spine.chest_upper", orientation = 0, slope = 0, rotation = 0, length = 0.1 },
-    { name = "body.spine.head", parent = "body.spine.neck", orientation = 0, slope = 0, rotation = 0, length = 0.2 }
+    { name = "body.torso.spine.chest", parent = "body.torso.spine.intermediate_upper", orientation = 0, slope = 0, rotation = 0, length = 0.3 },
+    { name = "body.torso.spine.intermediate_upper", parent = "body.torso.spine.intermediate_lower", orientation = 0, slope = 0, rotation = 0, length = 0.3 },
+    { name = "body.torso.spine.intermediate_lower", parent = "body.torso.spine.lower", orientation = 0, slope = 0, rotation = 0, length = 0.3 },
+    { name = "body.torso.spine.lower", parent = "", orientation = 0, slope = 0, rotation = 0, length = 0.3 }
 ]
 
 [body.right_arm]
 bones = [
-    { name = "body.right_arm.shoulder", parent = "body.torso.chest", orientation = 270, slope = 90, rotation = 0, length = 0.3 },
+    { name = "body.right_arm.shoulder", parent = "body.torso.spine.chest", orientation = 270, slope = 90, rotation = 0, length = 0.3 },
     { name = "body.right_arm.upper_arm", parent = "body.right_arm.shoulder", orientation = 270, slope = 90, rotation = 0, length = 0.3 },
     { name = "body.right_arm.lower_arm", parent = "body.right_arm.upper_arm", orientation = 270, slope = 90, rotation = 0, length = 0.3 },
     { name = "body.right_arm.wrist", parent = "body.right_arm.lower_arm", orientation = 270, slope = 90, rotation = 0, length = 0.1 }
@@ -37,7 +37,7 @@ bones = [
 
 [body.left_arm]
 bones = [
-    { name = "body.left_arm.shoulder", parent = "body.spine.chest_upper", orientation = 90, slope = 90, rotation = 0, length = 0.3 },
+    { name = "body.left_arm.shoulder", parent = "body.torso.spine.chest", orientation = 90, slope = 90, rotation = 0, length = 0.3 },
     { name = "body.left_arm.upper_arm", parent = "body.left_arm.shoulder", orientation = 90, slope = 90, rotation = 0, length = 0.3 }
 ]
 
