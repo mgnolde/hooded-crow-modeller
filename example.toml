@@ -11,6 +11,6 @@ length = 0.6
 [bones.head]
 parent = "bones.spine"  # Head starts at spine's end point
 orientation = 0
-slope = 49
+slope = 0
 rotation = 0
 length = 0.6

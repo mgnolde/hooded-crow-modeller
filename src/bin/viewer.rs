@@ -276,10 +276,16 @@ impl MeshData {
 }
 
 fn calculate_direction(orientation: f32, slope: f32) -> Vec3 {
-    let x = orientation.to_radians().cos() * slope.to_radians().cos();
-    let y = slope.to_radians().sin();
-    let z = orientation.to_radians().sin() * slope.to_radians().cos();
-    Vec3::new(x, y, z)
+    // Convert angles from degrees to radians
+    let orientation_rad = orientation.to_radians();
+    let slope_rad = slope.to_radians();
+
+    // Calculate direction vector
+    Vec3::new(
+        orientation_rad.cos() * slope_rad.cos(),
+        orientation_rad.sin() * slope_rad.cos(),
+        slope_rad.sin(),
+    )
 }
 
 fn setup(
@@ -289,6 +295,9 @@ fn setup(
     mesh_data: Res<MeshData>,
 ) {
     println!("\n=== Starting scene setup ===");
+
+    // Add coordinate axes
+    spawn_coordinate_axes(&mut commands, &mut meshes, &mut materials);
 
     // Add bones
     commands.spawn((
@@ -302,10 +311,11 @@ fn setup(
         CleanupMarker,
     ));
 
-    // Add 3D camera
+    // Add 3D camera looking straight down Z axis
     commands.spawn((
         Camera3dBundle {
-            transform: Transform::from_xyz(-10.0, 10.0, 20.0).looking_at(Vec3::ZERO, Vec3::Y),
+            transform: Transform::from_xyz(0.0, 0.0, 20.0)
+                .looking_at(Vec3::ZERO, Vec3::Y),
             ..default()
         },
         CleanupMarker,
@@ -315,6 +325,70 @@ fn setup(
     commands.spawn((SceneReady, CleanupMarker));
     commands.insert_resource(NextState(Some(ViewerState::Ready)));
     println!("Scene setup complete");
+}
+
+fn spawn_coordinate_axes(
+    commands: &mut Commands,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    materials: &mut ResMut<Assets<StandardMaterial>>,
+) {
+    // X axis - Red
+    commands.spawn((
+        PbrBundle {
+            mesh: meshes.add(create_axis_mesh()),
+            material: materials.add(StandardMaterial {
+                base_color: Color::RED,
+                unlit: true,
+                ..default()
+            }),
+            transform: Transform::from_xyz(0.0, 0.0, 0.0),
+            ..default()
+        },
+        CleanupMarker,
+    ));
+
+    // Y axis - Green
+    commands.spawn((
+        PbrBundle {
+            mesh: meshes.add(create_axis_mesh()),
+            material: materials.add(StandardMaterial {
+                base_color: Color::GREEN,
+                unlit: true,
+                ..default()
+            }),
+            transform: Transform::from_rotation(Quat::from_rotation_z(std::f32::consts::FRAC_PI_2)),
+            ..default()
+        },
+        CleanupMarker,
+    ));
+
+    // Z axis - Blue
+    commands.spawn((
+        PbrBundle {
+            mesh: meshes.add(create_axis_mesh()),
+            material: materials.add(StandardMaterial {
+                base_color: Color::BLUE,
+                unlit: true,
+                ..default()
+            }),
+            transform: Transform::from_rotation(Quat::from_rotation_y(-std::f32::consts::FRAC_PI_2)),
+            ..default()
+        },
+        CleanupMarker,
+    ));
+}
+
+fn create_axis_mesh() -> Mesh {
+    let mut mesh = Mesh::new(PrimitiveTopology::LineList, RenderAssetUsages::RENDER_WORLD);
+    
+    // Create a line from origin to 10 units in the X direction
+    mesh.insert_attribute(
+        Mesh::ATTRIBUTE_POSITION, 
+        vec![[0.0, 0.0, 0.0], [10.0, 0.0, 0.0]]
+    );
+    
+    mesh.insert_indices(Indices::U32(vec![0, 1]));
+    mesh
 }
 
 fn cleanup_scene(
