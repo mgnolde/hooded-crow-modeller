@@ -26,9 +26,9 @@ use std::{
     time::SystemTime,
     sync::Once,
 };
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use bevy::input::mouse::MouseMotion;
-use hooded_crow_modeller::{Model, BoneGroup};
+use hooded_crow_modeller::{Model, Group};
 
 #[derive(Resource)]
 struct FileWatcherResource {
@@ -78,23 +78,30 @@ struct Bone {
     parent: String,
 }
 
-#[derive(Debug, Resource, Deserialize)]
+#[derive(Resource)]
 struct MeshData {
-    groups: HashMap<String, BoneGroup>,
-}
-
-impl From<Model> for MeshData {
-    fn from(model: Model) -> Self {
-        Self {
-            groups: model.groups,
-        }
-    }
+    positions: HashMap<String, BonePosition>,
+    vertices: Vec<[f32; 3]>,
+    indices: Vec<u32>,
 }
 
 #[derive(Clone, Debug)]
 struct BonePosition {
     pub start: Vec3,
     pub end: Vec3,
+}
+
+impl From<Model> for MeshData {
+    fn from(model: Model) -> Self {
+        let positions = calculate_positions(&model.0);
+        let (vertices, indices) = create_mesh_data(&positions);
+        
+        Self {
+            positions,
+            vertices,
+            indices,
+        }
+    }
 }
 
 #[derive(Component)]
@@ -142,109 +149,15 @@ enum ViewerState {
 
 impl MeshData {
     fn resolve_positions(&self) -> HashMap<String, BonePosition> {
-        static mut POSITIONS: Option<HashMap<String, BonePosition>> = None;
-        static INIT: Once = Once::new();
-
-        unsafe {
-            INIT.call_once(|| {
-                let mut positions = HashMap::new();
-                
-                eprintln!("\n=== Starting Bone Position Resolution ===");
-                
-                fn process_group_bones(
-                    group: &BoneGroup,
-                    path: &str,
-                    positions: &mut HashMap<String, BonePosition>
-                ) {
-                    // Process bones in current group
-                    for bone in &group.bones {
-                        if !positions.contains_key(&bone.name) {
-                            eprintln!("Processing bone '{}' from path '{}'", bone.name, path);
-                            let parent_end = if bone.parent.is_empty() {
-                                None
-                            } else {
-                                let parent_name = bone.parent.strip_prefix("bones.").unwrap_or(&bone.parent);
-                                positions.get(parent_name).map(|p| p.end)
-                            };
-                            
-                            if parent_end.is_some() || bone.parent.is_empty() {
-                                let direction = calculate_direction(bone.orientation, bone.slope);
-                                let start = parent_end.unwrap_or(Vec3::ZERO);
-                                let end = start + direction * bone.length;
-                                
-                                positions.insert(bone.name.clone(), BonePosition { start, end });
-                                eprintln!("Added bone '{}' position: start={:?}, end={:?}", bone.name, start, end);
-                            }
-                        }
-                    }
-
-                    // Process bones in all nested subgroups recursively
-                    for (name, subgroup) in &group.subgroups {
-                        let new_path = if path.is_empty() {
-                            name.clone()
-                        } else {
-                            format!("{}.{}", path, name)
-                        };
-                        eprintln!("Processing subgroup: {}", new_path);
-                        process_group_bones(subgroup, &new_path, positions);
-                    }
-                }
-
-                // Keep processing until all bones are positioned
-                let mut last_size = 0;
-                while {
-                    let start_size = positions.len();
-                    
-                    // Process all groups and their subgroups
-                    for (name, group) in &self.groups {
-                        eprintln!("Processing top-level group: {}", name);
-                        process_group_bones(group, name, &mut positions);
-                    }
-
-                    positions.len() > last_size
-                } {
-                    last_size = positions.len();
-                }
-
-                eprintln!("\n=== Position Resolution Summary ===");
-                eprintln!("Total positions calculated: {}", positions.len());
-                for name in positions.keys() {
-                    eprintln!("Calculated position for: {}", name);
-                }
-
-                POSITIONS = Some(positions);
-            });
-
-            (*POSITIONS.as_ref().unwrap()).clone()
-        }
+        self.positions.clone()
     }
 
     fn get_vertices(&self) -> Vec<[f32; 3]> {
-        // Use cached positions to generate vertices
-        let positions = self.resolve_positions();
-        let mut vertices = Vec::new();
-        
-        for position in positions.values() {
-            vertices.push(position.start.into());
-            vertices.push(position.end.into());
-        }
-        
-        vertices
+        self.vertices.clone()
     }
 
     fn get_indices(&self) -> Vec<u32> {
-        // Use cached positions to generate indices
-        let positions = self.resolve_positions();
-        let mut indices = Vec::new();
-        let mut current_index = 0;
-        
-        for _ in positions.values() {
-            indices.push(current_index);
-            indices.push(current_index + 1);
-            current_index += 2;
-        }
-        
-        indices
+        self.indices.clone()
     }
 }
 
@@ -367,7 +280,7 @@ fn create_axis_mesh() -> Mesh {
 }
 
 fn cleanup_scene(
-    mut commands: Commands,
+    commands: &mut Commands,
     to_cleanup: Query<Entity, With<CleanupMarker>>,
 ) {
     println!("Cleaning up scene...");
@@ -382,25 +295,23 @@ fn check_file_changes(
     mut commands: Commands,
     mut file_watcher: ResMut<FileWatcherResource>,
     mesh_file: Res<MeshFile>,
-    export_path: Res<ExportPath>,
+    _export_path: Res<ExportPath>,  // Prefix with underscore since it's unused
     to_cleanup: Query<Entity, With<CleanupMarker>>,
 ) {
     if let Ok(metadata) = std::fs::metadata(&file_watcher.path) {
         if let Ok(modified) = metadata.modified() {
             if modified > file_watcher.last_modified {
                 println!("File changed, cleaning up scene...");
-                cleanup_scene(commands, to_cleanup);
+                cleanup_scene(&mut commands, to_cleanup);
                 
                 println!("Reloading...");
                 file_watcher.last_modified = modified;
 
                 // Read and parse the TOML file
                 if let Ok(mesh_toml) = std::fs::read_to_string(&mesh_file.0) {
-                    if let Ok(mesh_data) = toml::from_str::<MeshData>(&mesh_toml) {
-                        // Export to GLB
-                        if let Err(e) = export_to_glb(&mesh_data, &export_path.0) {
-                            eprintln!("Failed to export GLB: {}", e);
-                        }
+                    if let Ok(model) = toml::from_str::<Model>(&mesh_toml) {
+                        let mesh_data = MeshData::from(model);
+                        commands.insert_resource(mesh_data);
                     }
                 }
             }
@@ -762,6 +673,91 @@ fn world_to_screen(
         .map(|coords| Vec2::new(coords.x, coords.y))
 }
 
+fn calculate_positions(groups: &HashMap<String, Group>) -> HashMap<String, BonePosition> {
+    let mut positions = HashMap::new();
+    let mut pending_bones = Vec::new();
+    
+    // First pass: collect all bones
+    fn collect_bones(
+        group: &Group,
+        path: &str,
+        pending: &mut Vec<(String, String, f32, f32, f32, f32)>
+    ) {
+        for bone in &group.bones {
+            pending.push((
+                bone.name.clone(),
+                bone.parent.clone(),
+                bone.orientation,
+                bone.slope,
+                bone.rotation,
+                bone.length
+            ));
+            eprintln!("Collected bone: {} with parent {}", bone.name, bone.parent);
+        }
+        
+        for (name, subgroup) in &group.subgroups {
+            let new_path = if path.is_empty() {
+                name.clone()
+            } else {
+                format!("{}.{}", path, name)
+            };
+            eprintln!("Processing subgroup: {}", new_path);
+            collect_bones(subgroup, &new_path, pending);
+        }
+    }
+    
+    // Collect all bones
+    for (name, group) in groups {
+        eprintln!("Processing top group: {}", name);
+        collect_bones(group, name, &mut pending_bones);
+    }
+    
+    // Process bones until no more can be added
+    let mut made_progress = true;
+    while made_progress {
+        made_progress = false;
+        let mut remaining = Vec::new();
+        
+        for (name, parent, orientation, slope, rotation, length) in pending_bones.drain(..) {
+            let parent_end = if parent.is_empty() {
+                Some(Vec3::ZERO)
+            } else {
+                positions.get(&parent).map(|p: &BonePosition| p.end)
+            };
+            
+            if let Some(start) = parent_end {
+                let direction = calculate_direction(orientation, slope);
+                let end = start + direction * length;
+                positions.insert(name.clone(), BonePosition { start, end });
+                eprintln!("Positioned bone: {} at {:?} to {:?}", name, start, end);
+                made_progress = true;
+            } else {
+                remaining.push((name, parent, orientation, slope, rotation, length));
+            }
+        }
+        
+        pending_bones = remaining;
+    }
+    
+    positions
+}
+
+fn create_mesh_data(positions: &HashMap<String, BonePosition>) -> (Vec<[f32; 3]>, Vec<u32>) {
+    let mut vertices = Vec::new();
+    let mut indices = Vec::new();
+    let mut current_index = 0;
+    
+    for position in positions.values() {
+        vertices.push(position.start.into());
+        vertices.push(position.end.into());
+        indices.push(current_index);
+        indices.push(current_index + 1);
+        current_index += 2;
+    }
+    
+    (vertices, indices)
+}
+
 fn main() {
     // Get command line arguments
     let args: Vec<String> = std::env::args().collect();
@@ -787,8 +783,10 @@ fn main() {
     let mesh_toml = std::fs::read_to_string(mesh_file)
         .unwrap_or_else(|e| panic!("Failed to read file {}: {}", mesh_file, e));
     
-    let mesh_data: MeshData = toml::from_str(&mesh_toml)
+    let model: Model = toml::from_str(&mesh_toml)
         .unwrap_or_else(|e| panic!("Failed to parse TOML from {}: {}", mesh_file, e));
+    
+    let mesh_data = MeshData::from(model);
 
     App::new()
         .add_plugins((

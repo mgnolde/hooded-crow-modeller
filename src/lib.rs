@@ -3,17 +3,14 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 #[derive(Debug, Deserialize, Serialize)]
-pub struct Model {
-    #[serde(flatten)]
-    pub groups: HashMap<String, BoneGroup>,
-}
+pub struct Model(pub HashMap<String, Group>);
 
 #[derive(Debug, Deserialize, Serialize)]
-pub struct BoneGroup {
-    #[serde(default)]  // Makes bones optional with default of empty Vec
+pub struct Group {
+    #[serde(default)]  // Makes bones optional
     pub bones: Vec<Bone>,
-    #[serde(default)]  // Makes subgroups optional with default of empty HashMap
-    pub subgroups: HashMap<String, BoneGroup>,
+    #[serde(flatten)]  // This will allow direct nesting without "subgroups"
+    pub subgroups: HashMap<String, Group>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -66,7 +63,7 @@ impl Model {
         
         fn add_bones_from_group(
             bones: &mut HashMap<String, Bone>,
-            group: &BoneGroup,
+            group: &Group,
             path: &str
         ) {
             // Add bones from current group (if any)
@@ -75,7 +72,7 @@ impl Model {
                 bones.insert(bone.name.clone(), bone.clone());
             }
             
-            // Recursively add bones from all nested subgroups
+            // Recursively add bones from all nested groups
             for (name, subgroup) in &group.subgroups {
                 let new_path = if path.is_empty() {
                     name.clone()
@@ -83,22 +80,13 @@ impl Model {
                     format!("{}.{}", path, name)
                 };
                 eprintln!("Processing subgroup: {}", new_path);
-                
-                // Process the subgroup's bones
                 add_bones_from_group(bones, subgroup, &new_path);
-                
-                // Also process any nested subgroups within this subgroup
-                for (sub_name, sub_subgroup) in &subgroup.subgroups {
-                    let sub_path = format!("{}.{}", new_path, sub_name);
-                    eprintln!("Processing nested subgroup: {}", sub_path);
-                    add_bones_from_group(bones, sub_subgroup, &sub_path);
-                }
             }
         }
         
         // Process all groups
         eprintln!("\n=== Processing Bone Groups ===");
-        for (name, group) in &self.groups {
+        for (name, group) in &self.0 {
             eprintln!("Processing top-level group: {}", name);
             add_bones_from_group(&mut bones, group, name);
         }

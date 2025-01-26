@@ -1,52 +1,47 @@
-[groups]
+[body]
 
-[groups.spine]
+[body.spine]
 bones = [
-    { name = "spine_lower", parent = "", orientation = 0, slope = 0, rotation = 0, length = 0.3 },
-    { name = "spine_intermediate_lower", parent = "spine_lower", orientation = 0, slope = 0, rotation = 0, length = 0.3 },
-    { name = "spine_intermediate_upper", parent = "spine_intermediate_lower", orientation = 0, slope = 0, rotation = 0, length = 0.3 },
-    { name = "chest_spine_upper", parent = "spine_intermediate_upper", orientation = 0, slope = 0, rotation = 0, length = 0.3 },
-    { name = "neck", parent = "chest_spine_upper", orientation = 0, slope = 0, rotation = 0, length = 0.1 },
-    { name = "head", parent = "neck", orientation = 0, slope = 0, rotation = 0, length = 0.2 }
+    { name = "body.spine.lower", parent = "", orientation = 0, slope = 0, rotation = 0, length = 0.3 },
+    { name = "body.spine.intermediate_lower", parent = "body.spine.lower", orientation = 0, slope = 0, rotation = 0, length = 0.3 },
+    { name = "body.spine.intermediate_upper", parent = "body.spine.intermediate_lower", orientation = 0, slope = 0, rotation = 0, length = 0.3 },
+    { name = "body.spine.chest_upper", parent = "body.spine.intermediate_upper", orientation = 0, slope = 0, rotation = 0, length = 0.3 },
+    { name = "body.spine.neck", parent = "body.spine.chest_upper", orientation = 0, slope = 0, rotation = 0, length = 0.1 },
+    { name = "body.spine.head", parent = "body.spine.neck", orientation = 0, slope = 0, rotation = 0, length = 0.2 }
 ]
 
-[groups.right_arm]
+[body.right_arm]
 bones = [
-    { name = "shoulder_right", parent = "chest_spine_upper", orientation = 270, slope = 90, rotation = 0, length = 0.3 },
-    { name = "upper_arm_right", parent = "shoulder_right", orientation = 270, slope = 90, rotation = 0, length = 0.3 },
-    { name = "lower_arm_right", parent = "upper_arm_right", orientation = 270, slope = 90, rotation = 0, length = 0.3 },
-    { name = "wrist_right", parent = "lower_arm_right", orientation = 270, slope = 90, rotation = 0, length = 0.1 }
+    { name = "body.right_arm.shoulder", parent = "body.torso.chest", orientation = 270, slope = 90, rotation = 0, length = 0.3 },
+    { name = "body.right_arm.upper_arm", parent = "body.right_arm.shoulder", orientation = 270, slope = 90, rotation = 0, length = 0.3 },
+    { name = "body.right_arm.lower_arm", parent = "body.right_arm.upper_arm", orientation = 270, slope = 90, rotation = 0, length = 0.3 },
+    { name = "body.right_arm.wrist", parent = "body.right_arm.lower_arm", orientation = 270, slope = 90, rotation = 0, length = 0.1 }
 ]
 
-[groups.right_arm.subgroups]
-
-[groups.right_arm.subgroups.fingers]
-
-[groups.right_arm.subgroups.fingers.subgroups.thumb]
+[body.right_arm.fingers.thumb]
 bones = [
-    { name = "thumb_lower_right", parent = "wrist_right", orientation = 270, slope = 90, rotation = 0, length = 0.1 },
-    { name = "thumb_intermediate_right", parent = "thumb_lower_right", orientation = 270, slope = 90, rotation = 0, length = 0.1 },
-    { name = "thumb_upper_right", parent = "thumb_intermediate_right", orientation = 270, slope = 90, rotation = 0, length = 0.1 }
+    { name = "body.right_arm.fingers.thumb.lower", parent = "body.right_arm.wrist", orientation = 270, slope = 90, rotation = 0, length = 0.1 },
+    { name = "body.right_arm.fingers.thumb.middle", parent = "body.right_arm.fingers.thumb.lower", orientation = 270, slope = 90, rotation = 0, length = 0.1 },
+    { name = "body.right_arm.fingers.thumb.tip", parent = "body.right_arm.fingers.thumb.middle", orientation = 270, slope = 90, rotation = 0, length = 0.1 }
 ]
 
-[groups.right_arm.subgroups.fingers.subgroups.index]
+[body.right_arm.fingers.index]
 bones = [
-    { name = "palm_index_right", parent = "wrist_right", orientation = 170, slope = 120, rotation = 0, length = 0.1 },
-    { name = "index_finger_lower_right", parent = "palm_index_right", orientation = 170, slope = 120, rotation = 0, length = 0.1 },
-    { name = "index_finger_intermediate_right", parent = "index_finger_lower_right", orientation = 170, slope = 120, rotation = 0, length = 0.1 },
-    { name = "index_finger_upper_right", parent = "index_finger_intermediate_right", orientation = 170, slope = 120, rotation = 0, length = 0.1 }
+    { name = "body.right_arm.fingers.index.lower", parent = "body.right_arm.wrist", orientation = 170, slope = 120, rotation = 0, length = 0.1 },
+    { name = "body.right_arm.fingers.index.middle", parent = "body.right_arm.fingers.index.lower", orientation = 170, slope = 120, rotation = 0, length = 0.1 },
+    { name = "body.right_arm.fingers.index.tip", parent = "body.right_arm.fingers.index.middle", orientation = 170, slope = 120, rotation = 0, length = 0.1 }
 ]
 
-[groups.left_arm]
+[body.left_arm]
 bones = [
-    { name = "shoulder_left", parent = "chest_spine_upper", orientation = 90, slope = 90, rotation = 0, length = 0.3 },
-    { name = "arm_left", parent = "shoulder_left", orientation = 90, slope = 90, rotation = 0, length = 0.3 }
+    { name = "body.left_arm.shoulder", parent = "body.spine.chest_upper", orientation = 90, slope = 90, rotation = 0, length = 0.3 },
+    { name = "body.left_arm.upper_arm", parent = "body.left_arm.shoulder", orientation = 90, slope = 90, rotation = 0, length = 0.3 }
 ]
 
-[groups.left_leg]
+[body.left_leg]
 bones = [
-    { name = "pelvis_left", parent = "", orientation = 90, slope = 90, rotation = 0, length = 0.3 },
-    { name = "left_leg", parent = "pelvis_left", orientation = 90, slope = 180, rotation = 0, length = 0.3 }
+    { name = "body.left_leg.pelvis", parent = "", orientation = 90, slope = 90, rotation = 0, length = 0.3 },
+    { name = "body.left_leg.upper_leg", parent = "body.left_leg.pelvis", orientation = 90, slope = 180, rotation = 0, length = 0.3 }
 ]
 
 
