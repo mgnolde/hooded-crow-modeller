@@ -24,9 +24,11 @@ use std::{
     collections::{BTreeMap, HashMap},
     path::{PathBuf, Path},
     time::SystemTime,
+    sync::Once,
 };
 use serde::Deserialize;
 use bevy::input::mouse::MouseMotion;
+use hooded_crow_modeller::Model;
 
 #[derive(Resource)]
 struct FileWatcherResource {
@@ -67,6 +69,7 @@ struct Bone {
     orientation: Value,
     slope: Value,
     rotation: Value,
+    parent: String,
 }
 
 #[derive(Debug, Resource, Deserialize)]
@@ -74,6 +77,7 @@ struct MeshData {
     bones: HashMap<String, Bone>,
 }
 
+#[derive(Clone)]
 struct BonePosition {
     start: Vec3,
     end: Vec3,
@@ -159,105 +163,114 @@ impl MeshData {
     }
 
     fn resolve_positions(&self) -> HashMap<String, BonePosition> {
-        let mut positions = HashMap::new();
-        let mut last_size = 0;
-        
-        // First pass: resolve bones without dependencies
-        for (name, bone) in &self.bones {
-            if bone.connection.is_none() {
-                // This is a root bone (like lower_back)
-                let orientation = match bone.orientation {
-                    Value::Absolute(val) => val,
-                    Value::Relative { .. } => panic!("Root bone cannot have relative orientation"),
-                };
-                let slope = match bone.slope {
-                    Value::Absolute(val) => val,
-                    Value::Relative { .. } => panic!("Root bone cannot have relative slope"),
-                };
-                let rotation = match bone.rotation {
-                    Value::Absolute(val) => val,
-                    Value::Relative { .. } => panic!("Root bone cannot have relative rotation"),
-                };
+        // Use a static/lazy cache to store the positions
+        static mut POSITIONS: Option<HashMap<String, BonePosition>> = None;
+        static INIT: Once = Once::new();
 
-                // Calculate end position based on angles and length
-                let direction = calculate_direction(orientation, slope);
-                let end = direction * bone.length;
+        unsafe {
+            INIT.call_once(|| {
+                let mut positions = HashMap::new();
+                let mut last_size = 0;
+                
+                println!("\nFirst pass - resolving root bones:");
+                // First pass: resolve bones without dependencies
+                for (name, bone) in &self.bones {
+                    if bone.parent.is_empty() {
+                        println!("└─ Processing root bone: {}", name);
+                        let orientation = match bone.orientation {
+                            Value::Absolute(val) => val,
+                            Value::Relative { .. } => panic!("Root bone cannot have relative orientation"),
+                        };
+                        let slope = match bone.slope {
+                            Value::Absolute(val) => val,
+                            Value::Relative { .. } => panic!("Root bone cannot have relative slope"),
+                        };
+                        let rotation = match bone.rotation {
+                            Value::Absolute(val) => val,
+                            Value::Relative { .. } => panic!("Root bone cannot have relative rotation"),
+                        };
 
-                positions.insert(name.clone(), BonePosition {
-                    start: Vec3::ZERO,
-                    end,
-                    orientation,
-                    slope,
-                    rotation,
-                });
-            }
-        }
+                        let direction = calculate_direction(orientation, slope);
+                        let end = direction * bone.length;
 
-        // Second pass: resolve bones with dependencies
-        while positions.len() > last_size {
-            last_size = positions.len();
-            
-            for (name, bone) in &self.bones {
-                if !positions.contains_key(name) {
-                    if let Some(ref connection) = bone.connection {
-                        // Remove the "bones." prefix if it exists
-                        let parent_name: &str = connection.strip_prefix("bones.").unwrap_or(connection);
-                        
-                        if let Some(parent) = positions.get(parent_name) {
-                            // Calculate relative values
-                            let orientation = self.resolve_value(&bone.orientation, parent_name);
-                            let slope = self.resolve_value(&bone.slope, parent_name);
-                            let rotation = self.resolve_value(&bone.rotation, parent_name);
+                        println!("  ├─ Angles: orientation={}, slope={}, rotation={}", orientation, slope, rotation);
+                        println!("  └─ Position: start=ORIGIN, end={:?}", end);
 
-                            // Calculate end position
-                            let direction = calculate_direction(orientation, slope);
-                            let end = parent.end + direction * bone.length;
+                        positions.insert(name.clone(), BonePosition {
+                            start: Vec3::ZERO,
+                            end,
+                            orientation,
+                            slope,
+                            rotation,
+                        });
+                    }
+                }
 
-                            positions.insert(name.clone(), BonePosition {
-                                start: parent.end,
-                                end,
-                                orientation,
-                                slope,
-                                rotation,
-                            });
+                println!("\nSecond pass - resolving dependent bones:");
+                while positions.len() > last_size {
+                    last_size = positions.len();
+                    
+                    for (name, bone) in &self.bones {
+                        if !positions.contains_key(name) && !bone.parent.is_empty() {
+                            let parent_name = bone.parent.strip_prefix("bones.").unwrap_or(&bone.parent);
+                            
+                            if let Some(parent) = positions.get(parent_name) {
+                                println!("└─ Processing bone: {} (parent: {})", name, parent_name);
+                                
+                                let orientation = self.resolve_value(&bone.orientation, parent_name);
+                                let slope = self.resolve_value(&bone.slope, parent_name);
+                                let rotation = self.resolve_value(&bone.rotation, parent_name);
+
+                                let direction = calculate_direction(orientation, slope);
+                                let end = parent.end + direction * bone.length;
+
+                                println!("  ├─ Resolved angles: orientation={}, slope={}, rotation={}", orientation, slope, rotation);
+                                println!("  └─ Position: start={:?}, end={:?}", parent.end, end);
+
+                                positions.insert(name.clone(), BonePosition {
+                                    start: parent.end,
+                                    end,
+                                    orientation,
+                                    slope,
+                                    rotation,
+                                });
+                            }
                         }
                     }
                 }
-            }
-        }
 
-        positions
+                POSITIONS = Some(positions);
+            });
+
+            (*POSITIONS.as_ref().unwrap()).clone()
+        }
     }
 
     fn get_vertices(&self) -> Vec<[f32; 3]> {
+        // Use cached positions to generate vertices
         let positions = self.resolve_positions();
         let mut vertices = Vec::new();
-
-        println!("Resolved positions:");
-        for (name, position) in positions.iter() {
-            println!("Bone {}: start={:?}, end={:?}", name, position.start, position.end);
+        
+        for position in positions.values() {
             vertices.push(position.start.into());
             vertices.push(position.end.into());
         }
-        println!("Final vertices: {:?}", vertices);
-
+        
         vertices
     }
 
     fn get_indices(&self) -> Vec<u32> {
+        // Use cached positions to generate indices
         let positions = self.resolve_positions();
         let mut indices = Vec::new();
         let mut current_index = 0;
-
-        println!("Creating indices:");
+        
         for _ in positions.values() {
             indices.push(current_index);
             indices.push(current_index + 1);
-            println!("Added line: {} -> {}", current_index, current_index + 1);
             current_index += 2;
         }
-        println!("Final indices: {:?}", indices);
-
+        
         indices
     }
 }
@@ -648,6 +661,42 @@ fn draw_joints(
             Color::RED,            // Color
         );
     }
+}
+
+fn draw_bones(model: &Model, commands: &mut Commands, meshes: &mut ResMut<Assets<Mesh>>, materials: &mut ResMut<Assets<StandardMaterial>>) {
+    println!("=== Starting scene setup ===");
+    
+    // Get vertices and indices in the correct order
+    let (vertices, indices) = model.get_bone_chain();
+    
+    println!("Vertices from get_bone_chain:");
+    for (i, v) in vertices.iter().enumerate() {
+        println!("  Vertex {}: {:?}", i, v);
+    }
+    println!("Indices from get_bone_chain: {:?}", indices);
+
+    // Create a single mesh for all bones
+    let mut mesh = Mesh::new(PrimitiveTopology::LineList, RenderAssetUsages::default());
+    
+    // Convert vertices to the format Bevy expects
+    let vertices_vec: Vec<[f32; 3]> = vertices.iter().copied().collect();
+    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, vertices_vec);
+    
+    // Convert indices to the format Bevy expects
+    let indices_vec: Vec<u32> = indices.iter().copied().collect();
+    mesh.insert_indices(Indices::U32(indices_vec));
+
+    // Spawn the mesh
+    commands.spawn(PbrBundle {
+        mesh: meshes.add(mesh),
+        material: materials.add(StandardMaterial {
+            base_color: Color::WHITE,
+            ..default()
+        }),
+        ..default()
+    });
+
+    println!("Scene setup complete");
 }
 
 fn main() {

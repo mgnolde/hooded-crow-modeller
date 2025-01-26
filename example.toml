@@ -1,19 +1,16 @@
 [bones]
+# Root
+[bones.spine]
+parent = ""  # Root bone starts at origin
+orientation = 0
+slope = 0
+rotation = 0
+length = 0.6
 
-[bones.lower_back]
-orientation = 10
-slope = 5
-rotation = 5
-length = 1
-vertices = { a = { ratio = 0.1, distance = 10, slope = 5, rotation = 5 }, b = { ratio = 0.1, distance = 10, slope = 5, rotation = 5 }, c = { ratio = 0.1, distance = 10, slope = 5, rotation = 5 } }
-faces = { f = ["a", "b", "c"] }
-
-[bones.mid_back]
-connection = "bones.lower_back"
-origin = "connection.destination"
-orientation = { reference = "connection.orientation", offset = 0 }
-slope = { reference = "connection.slope", offset = 90 }
-rotation = { reference = "connection.rotation", offset = 0 }
-length = 1
-vertices = { a = { ratio = 0.1, distance = 10, slope = 5, rotation = 5 }, b = { ratio = 0.1, distance = 10, slope = 5, rotation = 5 }, c = { ratio = 0.1, distance = 10, slope = 5, rotation = 5 } }
-faces = { f = ["a", "b", "c"] }
+# Head
+[bones.head]
+parent = "bones.spine"  # Head starts at spine's end point
+orientation = 0
+slope = 49
+rotation = 0
+length = 0.6

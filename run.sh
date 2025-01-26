@@ -1,1 +1,1 @@
-cargo run --bin viewer -- mesh.json --export ${HOME}\Desktop\mesh.glb
+cargo run --bin viewer -- example.toml --export ${HOME}\Desktop\mesh.glb
