@@ -284,11 +284,10 @@ fn calculate_direction(orientation: f32, slope: f32) -> Vec3 {
     let slope_rad = slope.to_radians();
 
     // Calculate direction vector
-    // When orientation=0 and slope=0, this will point up (0, 1, 0)
     Vec3::new(
-        orientation_rad.sin() * slope_rad.cos(),
-        slope_rad.cos(),  // Y component now primary
-        orientation_rad.cos() * slope_rad.cos(),
+        slope_rad.sin() * orientation_rad.sin(),  // X component
+        slope_rad.cos(),                          // Y component
+        slope_rad.sin() * orientation_rad.cos()   // Z component
     )
 }
 
