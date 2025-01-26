@@ -1,15 +1,30 @@
 [bones]
-# Root
-[bones.spine]
+
+[bones.lower_spine]
 parent = ""  # Root bone starts at origin
 orientation = 0
 slope = 0
 rotation = 0
 length = 0.6
 
-# Head
+[bones.left_lef]
+parent = ""  # Root bone starts at origin
+orientation = 0
+slope = 130
+rotation = 0
+length = 0.6
+
+
+[bones.upper_spine]
+parent = "bones.lower_spine"
+orientation = 0
+slope = 0
+rotation = 0
+length = 0.6
+
+
 [bones.head]
-parent = "bones.spine"  # Head starts at spine's end point
+parent = "bones.upper_spine"
 orientation = 0
 slope = 50
 rotation = 0
