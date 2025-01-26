@@ -28,7 +28,7 @@ use std::{
 };
 use serde::Deserialize;
 use bevy::input::mouse::MouseMotion;
-use hooded_crow_modeller::Model;
+use hooded_crow_modeller::{Model, BoneGroup};
 
 #[derive(Resource)]
 struct FileWatcherResource {
@@ -80,16 +80,21 @@ struct Bone {
 
 #[derive(Debug, Resource, Deserialize)]
 struct MeshData {
-    bones: HashMap<String, Bone>,
+    groups: HashMap<String, BoneGroup>,
 }
 
-#[derive(Clone)]
+impl From<Model> for MeshData {
+    fn from(model: Model) -> Self {
+        Self {
+            groups: model.groups,
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
 struct BonePosition {
-    start: Vec3,
-    end: Vec3,
-    orientation: f32,
-    slope: f32,
-    rotation: f32,
+    pub start: Vec3,
+    pub end: Vec3,
 }
 
 #[derive(Component)]
@@ -136,40 +141,7 @@ enum ViewerState {
 }
 
 impl MeshData {
-    fn resolve_value(&self, value: &Value, parent_name: &str) -> f32 {
-        match value {
-            Value::Absolute(val) => *val,
-            Value::Relative { reference, offset } => {
-                // Split the reference path into parts
-                let parts: Vec<&str> = reference.split('.').collect();
-                if parts.len() != 2 {
-                    panic!("Invalid reference path: {}", reference);
-                }
-
-                // First part should be "connection"
-                if parts[0] != "connection" {
-                    panic!("Reference must start with 'connection': {}", reference);
-                }
-
-                // Get the parent bone
-                let parent = self.bones.get(parent_name)
-                    .unwrap_or_else(|| panic!("Parent bone not found: {}", parent_name));
-
-                // Get the referenced value based on the second part
-                let base_value = match parts[1] {
-                    "orientation" => self.resolve_value(&parent.orientation, parent_name),
-                    "slope" => self.resolve_value(&parent.slope, parent_name),
-                    "rotation" => self.resolve_value(&parent.rotation, parent_name),
-                    _ => panic!("Invalid reference property: {}", parts[1]),
-                };
-
-                base_value + offset
-            }
-        }
-    }
-
     fn resolve_positions(&self) -> HashMap<String, BonePosition> {
-        // Use a static/lazy cache to store the positions
         static mut POSITIONS: Option<HashMap<String, BonePosition>> = None;
         static INIT: Once = Once::new();
 
@@ -178,72 +150,49 @@ impl MeshData {
                 let mut positions = HashMap::new();
                 let mut last_size = 0;
                 
-                println!("\nFirst pass - resolving root bones:");
-                // First pass: resolve bones without dependencies
-                for (name, bone) in &self.bones {
-                    if bone.parent.is_empty() {
-                        println!("└─ Processing root bone: {}", name);
-                        let orientation = match bone.orientation {
-                            Value::Absolute(val) => val,
-                            Value::Relative { .. } => panic!("Root bone cannot have relative orientation"),
-                        };
-                        let slope = match bone.slope {
-                            Value::Absolute(val) => val,
-                            Value::Relative { .. } => panic!("Root bone cannot have relative slope"),
-                        };
-                        let rotation = match bone.rotation {
-                            Value::Absolute(val) => val,
-                            Value::Relative { .. } => panic!("Root bone cannot have relative rotation"),
-                        };
-
-                        let direction = calculate_direction(orientation, slope);
-                        let end = direction * bone.length;
-
-                        println!("  ├─ Angles: orientation={}, slope={}, rotation={}", orientation, slope, rotation);
-                        println!("  └─ Position: start=ORIGIN, end={:?}", end);
-
-                        positions.insert(name.clone(), BonePosition {
-                            start: Vec3::ZERO,
-                            end,
-                            orientation,
-                            slope,
-                            rotation,
-                        });
-                    }
-                }
-
-                println!("\nSecond pass - resolving dependent bones:");
-                while positions.len() > last_size {
-                    last_size = positions.len();
+                // Process all bones until no new bones are added
+                while {
+                    let start_size = positions.len();
                     
-                    for (name, bone) in &self.bones {
-                        if !positions.contains_key(name) && !bone.parent.is_empty() {
-                            let parent_name = bone.parent.strip_prefix("bones.").unwrap_or(&bone.parent);
-                            
-                            if let Some(parent) = positions.get(parent_name) {
-                                println!("└─ Processing bone: {} (parent: {})", name, parent_name);
+                    // Helper function to process bones in a group and its subgroups
+                    fn process_group_bones(
+                        group: &BoneGroup,
+                        positions: &mut HashMap<String, BonePosition>
+                    ) {
+                        // Process bones in current group
+                        for bone in &group.bones {
+                            if !positions.contains_key(&bone.name) {
+                                let parent_end = if bone.parent.is_empty() {
+                                    None
+                                } else {
+                                    let parent_name = bone.parent.strip_prefix("bones.").unwrap_or(&bone.parent);
+                                    positions.get(parent_name).map(|p| p.end)
+                                };
                                 
-                                let orientation = self.resolve_value(&bone.orientation, parent_name);
-                                let slope = self.resolve_value(&bone.slope, parent_name);
-                                let rotation = self.resolve_value(&bone.rotation, parent_name);
-
-                                let direction = calculate_direction(orientation, slope);
-                                let end = parent.end + direction * bone.length;
-
-                                println!("  ├─ Resolved angles: orientation={}, slope={}, rotation={}", orientation, slope, rotation);
-                                println!("  └─ Position: start={:?}, end={:?}", parent.end, end);
-
-                                positions.insert(name.clone(), BonePosition {
-                                    start: parent.end,
-                                    end,
-                                    orientation,
-                                    slope,
-                                    rotation,
-                                });
+                                if parent_end.is_some() || bone.parent.is_empty() {
+                                    let direction = calculate_direction(bone.orientation, bone.slope);
+                                    let start = parent_end.unwrap_or(Vec3::ZERO);
+                                    let end = start + direction * bone.length;
+                                    
+                                    positions.insert(bone.name.clone(), BonePosition { start, end });
+                                }
                             }
                         }
+
+                        // Process bones in subgroups
+                        for (_, subgroup) in &group.subgroups {
+                            process_group_bones(subgroup, positions);
+                        }
                     }
-                }
+
+                    // Process all groups
+                    for (_, group) in &self.groups {
+                        process_group_bones(group, &mut positions);
+                    }
+
+                    // Continue if we added any new bones
+                    positions.len() > start_size
+                } {}
 
                 POSITIONS = Some(positions);
             });
@@ -282,19 +231,17 @@ impl MeshData {
 }
 
 fn calculate_direction(orientation: f32, slope: f32) -> Vec3 {
-    // Convert angles from degrees to radians
     let orientation_rad = orientation.to_radians();
     let slope_rad = slope.to_radians();
 
-    // Calculate direction vector
     Vec3::new(
-        slope_rad.sin() * orientation_rad.sin(),  // X component
-        slope_rad.cos(),                          // Y component
-        slope_rad.sin() * orientation_rad.cos()   // Z component
+        slope_rad.sin() * orientation_rad.sin(),
+        slope_rad.cos(),
+        slope_rad.sin() * orientation_rad.cos()
     )
 }
 
-fn setup(
+pub fn setup(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
@@ -743,10 +690,10 @@ fn draw_joints(
 
     for position in positions.values() {
         gizmos.sphere(
-            position.start * scale, // Position
-            Quat::IDENTITY,        // Rotation
-            0.15,                  // Radius reduced to 25% (from 1.0 to 0.25)
-            Color::RED,            // Color
+            position.start * scale,
+            Quat::IDENTITY,
+            0.25,
+            Color::RED,
         );
     }
 }
