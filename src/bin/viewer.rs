@@ -683,6 +683,9 @@ fn calculate_positions(groups: &HashMap<String, Group>) -> HashMap<String, BoneP
         path: &str,
         pending: &mut Vec<(String, String, f32, f32, f32, f32)>
     ) {
+        eprintln!("Processing group at path: {}", path);
+        
+        // Add bones from current group
         for bone in &group.bones {
             pending.push((
                 bone.name.clone(),
@@ -692,31 +695,40 @@ fn calculate_positions(groups: &HashMap<String, Group>) -> HashMap<String, BoneP
                 bone.rotation,
                 bone.length
             ));
-            eprintln!("Collected bone: {} with parent {}", bone.name, bone.parent);
+            eprintln!("  Added bone: {} (parent: {})", bone.name, bone.parent);
         }
         
+        // Process all subgroups
         for (name, subgroup) in &group.subgroups {
             let new_path = if path.is_empty() {
                 name.clone()
             } else {
                 format!("{}.{}", path, name)
             };
-            eprintln!("Processing subgroup: {}", new_path);
+            eprintln!("  Entering subgroup: {}", new_path);
             collect_bones(subgroup, &new_path, pending);
         }
     }
     
     // Collect all bones
+    eprintln!("\n=== Starting Bone Collection ===");
     for (name, group) in groups {
-        eprintln!("Processing top group: {}", name);
+        eprintln!("Processing top-level group: {}", name);
         collect_bones(group, name, &mut pending_bones);
     }
     
+    eprintln!("\n=== Starting Position Calculation ===");
+    eprintln!("Total bones to process: {}", pending_bones.len());
+    
     // Process bones until no more can be added
+    let mut iteration = 0;
     let mut made_progress = true;
-    while made_progress {
+    while made_progress && !pending_bones.is_empty() {
         made_progress = false;
         let mut remaining = Vec::new();
+        
+        eprintln!("\nIteration {}", iteration);
+        eprintln!("Bones remaining: {}", pending_bones.len());
         
         for (name, parent, orientation, slope, rotation, length) in pending_bones.drain(..) {
             let parent_end = if parent.is_empty() {
@@ -729,14 +741,28 @@ fn calculate_positions(groups: &HashMap<String, Group>) -> HashMap<String, BoneP
                 let direction = calculate_direction(orientation, slope);
                 let end = start + direction * length;
                 positions.insert(name.clone(), BonePosition { start, end });
-                eprintln!("Positioned bone: {} at {:?} to {:?}", name, start, end);
+                eprintln!("  Positioned: {} at {:?} to {:?}", name, start, end);
                 made_progress = true;
             } else {
+                eprintln!("  Deferred: {} (waiting for parent: {})", name, parent);
                 remaining.push((name, parent, orientation, slope, rotation, length));
             }
         }
         
         pending_bones = remaining;
+        iteration += 1;
+    }
+    
+    if !pending_bones.is_empty() {
+        eprintln!("\n=== Warning: Unpositioned Bones ===");
+        for (name, parent, _, _, _, _) in &pending_bones {
+            eprintln!("Could not position {} (missing parent: {})", name, parent);
+        }
+    }
+    
+    eprintln!("\n=== Final Position Count: {} ===", positions.len());
+    for name in positions.keys() {
+        eprintln!("Positioned: {}", name);
     }
     
     positions

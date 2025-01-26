@@ -1,4 +1,7 @@
-[body]
+[body.torso]
+bones = [
+    { name = "body.torso.chest", parent = "body.spine.chest_upper", orientation = 0, slope = 0, rotation = 0, length = 0.3 }
+]
 
 [body.spine]
 bones = [
