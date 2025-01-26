@@ -52,6 +52,9 @@ struct MeshFile(PathBuf);
 #[derive(Resource)]
 struct ExportPath(PathBuf);
 
+#[derive(Resource)]
+struct ShowAxes(bool);
+
 #[derive(Debug, Deserialize)]
 #[serde(untagged)]
 pub enum Value {
@@ -281,10 +284,11 @@ fn calculate_direction(orientation: f32, slope: f32) -> Vec3 {
     let slope_rad = slope.to_radians();
 
     // Calculate direction vector
+    // When orientation=0 and slope=0, this will point up (0, 1, 0)
     Vec3::new(
-        orientation_rad.cos() * slope_rad.cos(),
         orientation_rad.sin() * slope_rad.cos(),
-        slope_rad.sin(),
+        slope_rad.cos(),  // Y component now primary
+        orientation_rad.cos() * slope_rad.cos(),
     )
 }
 
@@ -293,11 +297,14 @@ fn setup(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mesh_data: Res<MeshData>,
+    show_axes: Res<ShowAxes>,
 ) {
     println!("\n=== Starting scene setup ===");
 
-    // Add coordinate axes
-    spawn_coordinate_axes(&mut commands, &mut meshes, &mut materials);
+    // Add coordinate axes only if enabled
+    if show_axes.0 {
+        spawn_coordinate_axes(&mut commands, &mut meshes, &mut materials);
+    }
 
     // Add bones
     commands.spawn((
@@ -776,8 +783,22 @@ fn draw_bones(model: &Model, commands: &mut Commands, meshes: &mut ResMut<Assets
 fn main() {
     // Get command line arguments
     let args: Vec<String> = std::env::args().collect();
-    let mesh_file = args.get(1).expect("Please provide a mesh file path");
-    let export_path = args.get(2).expect("Please provide an export path");
+    
+    // Check if --show-axis flag is present
+    let show_axes = args.iter().any(|arg| arg == "--show-axis");
+    
+    // Get non-flag arguments (files)
+    let file_args: Vec<_> = args.iter()
+        .filter(|arg| !arg.starts_with("--"))
+        .collect();
+    
+    // First non-flag argument after program name is mesh file
+    let mesh_file = file_args.get(1)
+        .expect("Please provide a mesh file path");
+    
+    // Second non-flag argument is export path
+    let export_path = file_args.get(2)
+        .expect("Please provide an export path");
 
     // Read and parse the TOML file
     let mesh_toml = std::fs::read_to_string(mesh_file)
@@ -796,6 +817,7 @@ fn main() {
         .insert_resource(ExportPath(PathBuf::from(export_path)))
         .insert_resource(mesh_data)
         .insert_resource(MeshFile(PathBuf::from(mesh_file)))
+        .insert_resource(ShowAxes(show_axes))
         .add_systems(Startup, setup)
         .add_systems(Update, (
             setup_camera,
