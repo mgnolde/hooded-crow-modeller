@@ -55,6 +55,9 @@ struct ExportPath(PathBuf);
 #[derive(Resource)]
 struct ShowAxes(bool);
 
+#[derive(Resource)]
+struct ShowLabels(bool);
+
 #[derive(Debug, Deserialize)]
 #[serde(untagged)]
 pub enum Value {
@@ -297,6 +300,7 @@ fn setup(
     mut materials: ResMut<Assets<StandardMaterial>>,
     mesh_data: Res<MeshData>,
     show_axes: Res<ShowAxes>,
+    show_labels: Res<ShowLabels>,
 ) {
     println!("\n=== Starting scene setup ===");
 
@@ -671,33 +675,37 @@ fn export_to_glb(mesh_data: &MeshData, export_path: &Path) -> Result<(), Box<dyn
 }
 
 fn draw_labels(
-    mut contexts: EguiContexts,
+    mut egui_contexts: EguiContexts,
+    windows: Query<&Window>,
+    camera: Query<(&Camera, &GlobalTransform)>,
     mesh_data: Res<MeshData>,
-    camera_query: Query<(&Camera, &GlobalTransform), With<Camera3d>>,
+    show_labels: Res<ShowLabels>,
 ) {
-    let ctx = contexts.ctx_mut();
-    let (camera, camera_transform) = camera_query.single();
+    // Early return if labels are disabled
+    if !show_labels.0 {
+        return;
+    }
+
     let positions = mesh_data.resolve_positions();
-    let scale = 5.0;
+    let (camera, camera_transform) = camera.single();
+    let window = windows.single();
+    let scale = 5.0;  // Same scale as used in setup for the bones
 
+    let mut ctx = egui_contexts.ctx_mut();
+    
     for (name, position) in positions.iter() {
-        // Calculate middle point of the bone
-        let middle_pos = (position.start + position.end) * 0.5;  // Average of start and end
-        let world_pos = middle_pos * scale + Vec3::new(0.0, 0.5, 0.0);
-        
-        if let Some(screen_pos) = camera.world_to_viewport(camera_transform, world_pos) {
-            let painter = ctx.layer_painter(egui::LayerId::new(
-                egui::Order::Foreground,
-                egui::Id::new("labels"),
-            ));
-
-            painter.text(
-                egui::pos2(screen_pos.x, screen_pos.y),
-                egui::Align2::CENTER_CENTER,
-                name,
-                egui::FontId::proportional(20.0),
-                egui::Color32::WHITE,
-            );
+        if let Some(screen_pos) = world_to_screen(
+            window,
+            camera,
+            camera_transform,
+            position.end * scale,
+        ) {
+            egui::Area::new(egui::Id::new(name))
+                .fixed_pos(egui::pos2(screen_pos.x, screen_pos.y))
+                .show(ctx, |ui| {
+                    ui.style_mut().text_styles.get_mut(&egui::TextStyle::Body).unwrap().size = 8.0;
+                    ui.colored_label(egui::Color32::WHITE, name);  // Changed to white color
+                });
         }
     }
 }
@@ -737,7 +745,7 @@ fn draw_joints(
         gizmos.sphere(
             position.start * scale, // Position
             Quat::IDENTITY,        // Rotation
-            0.25,                  // Radius reduced to 25% (from 1.0 to 0.25)
+            0.15,                  // Radius reduced to 25% (from 1.0 to 0.25)
             Color::RED,            // Color
         );
     }
@@ -779,12 +787,23 @@ fn draw_bones(model: &Model, commands: &mut Commands, meshes: &mut ResMut<Assets
     println!("Scene setup complete");
 }
 
+fn world_to_screen(
+    window: &Window,
+    camera: &Camera,
+    camera_transform: &GlobalTransform,
+    world_pos: Vec3,
+) -> Option<Vec2> {
+    camera.world_to_viewport(camera_transform, world_pos)
+        .map(|coords| Vec2::new(coords.x, coords.y))
+}
+
 fn main() {
     // Get command line arguments
     let args: Vec<String> = std::env::args().collect();
     
-    // Check if --show-axis flag is present
+    // Check flags
     let show_axes = args.iter().any(|arg| arg == "--show-axis");
+    let show_labels = args.iter().any(|arg| arg == "--show-labels");
     
     // Get non-flag arguments (files)
     let file_args: Vec<_> = args.iter()
@@ -817,6 +836,7 @@ fn main() {
         .insert_resource(mesh_data)
         .insert_resource(MeshFile(PathBuf::from(mesh_file)))
         .insert_resource(ShowAxes(show_axes))
+        .insert_resource(ShowLabels(show_labels))
         .add_systems(Startup, setup)
         .add_systems(Update, (
             setup_camera,

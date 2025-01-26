@@ -1,31 +1,160 @@
 [bones]
 
-[bones.lower_spine]
-parent = ""  # Root bone starts at origin
-orientation = 0
-slope = 0
-rotation = 0
-length = 0.6
-
-[bones.left_lef]
-parent = ""  # Root bone starts at origin
-orientation = 0
-slope = 130
-rotation = 0
-length = 0.6
-
-
-[bones.upper_spine]
-parent = "bones.lower_spine"
-orientation = 0
-slope = 0
-rotation = 0
-length = 0.6
-
-
 [bones.head]
-parent = "bones.upper_spine"
+parent = "bones.neck"
 orientation = 0
-slope = 50
+slope = 0
+rotation = 0
+length = 0.2
+
+[bones.neck]
+parent = "bones.chest_spine_upper"
+orientation = 0
+slope = 0
+rotation = 0
+length = 0.1
+
+
+[bones.shoulder_right]
+parent = "bones.chest_spine_upper"
+orientation = 270
+slope = 90
 rotation = 0
 length = 0.3
+
+[bones.upper_arm_right]
+parent = "bones.shoulder_right"
+orientation = 270
+slope = 90
+rotation = 0
+length = 0.3
+
+[bones.lower_arm_right]
+parent = "bones.upper_arm_right"
+orientation = 270
+slope = 90
+rotation = 0
+length = 0.3
+
+[bones.wrist_right]
+parent = "bones.lower_arm_right"
+orientation = 270
+slope = 90
+rotation = 0
+length = 0.1
+
+[bones.thumb_lower_right]
+parent = "bones.wrist_right"
+orientation = 270
+slope = 90
+rotation = 0
+length = 0.1
+
+[bones.thumb_intermediate_right]
+parent = "bones.thumb_lower_right"
+orientation = 270
+slope = 90
+rotation = 0
+length = 0.1
+
+[bones.thumb_upper_right]
+parent = "bones.thumb_intermediate_right"
+orientation = 270
+slope = 90
+rotation = 0
+length = 0.1
+
+[bones.palm_index_right]
+parent = "bones.wrist_right"
+orientation = 170
+slope = 120
+rotation = 0
+length = 0.1
+
+[bones.index_finger_lower_right]
+parent = "bones.palm_index_right"
+orientation = 170
+slope = 120
+rotation = 0
+length = 0.1
+
+[bones.index_finger_intermediate_right]
+parent = "bones.index_finger_lower_right"
+orientation = 170
+slope = 120
+rotation = 0
+length = 0.1
+
+[bones.index_finger_upper_right]
+parent = "bones.index_finger_intermediate_right"
+orientation = 170
+slope = 120
+rotation = 0
+length = 0.1
+
+
+
+[bones.shoulder_left]
+parent = "bones.chest_spine_upper"
+orientation = 90
+slope = 90
+rotation = 0
+length = 0.3
+
+
+[bones.arm_left]
+parent = "bones.shoulder_left"
+orientation = 90
+slope = 90
+rotation = 0
+length = 0.3
+
+
+[bones.chest_spine_upper]
+parent = "bones.spine_intermediate_upper"
+orientation = 0
+slope = 0
+rotation = 0
+length = 0.3
+
+
+[bones.spine_intermediate_upper]
+parent = "bones.spine_intermediate_lower"
+orientation = 0
+slope = 0
+rotation = 0
+length = 0.3
+
+[bones.spine_intermediate_lower]
+parent = "bones.spine_lower"
+orientation = 0
+slope = 0
+rotation = 0
+length = 0.3
+
+
+[bones.spine_lower]
+parent = ""  # Root bone starts at origin
+orientation = 0
+slope = 0
+rotation = 0
+length = 0.3
+
+[bones.pelvis_left]
+parent = ""  # Root bone starts at origin
+orientation = 90
+slope = 90
+rotation = 0
+length = 0.3
+
+
+[bones.left_leg]
+parent = "pelvis_left"
+orientation = 90
+slope = 180
+rotation = 0
+length = 0.3
+
+
+
+
