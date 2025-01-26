@@ -148,51 +148,69 @@ impl MeshData {
         unsafe {
             INIT.call_once(|| {
                 let mut positions = HashMap::new();
-                let mut last_size = 0;
                 
-                // Process all bones until no new bones are added
+                eprintln!("\n=== Starting Bone Position Resolution ===");
+                
+                fn process_group_bones(
+                    group: &BoneGroup,
+                    path: &str,
+                    positions: &mut HashMap<String, BonePosition>
+                ) {
+                    // Process bones in current group
+                    for bone in &group.bones {
+                        if !positions.contains_key(&bone.name) {
+                            eprintln!("Processing bone '{}' from path '{}'", bone.name, path);
+                            let parent_end = if bone.parent.is_empty() {
+                                None
+                            } else {
+                                let parent_name = bone.parent.strip_prefix("bones.").unwrap_or(&bone.parent);
+                                positions.get(parent_name).map(|p| p.end)
+                            };
+                            
+                            if parent_end.is_some() || bone.parent.is_empty() {
+                                let direction = calculate_direction(bone.orientation, bone.slope);
+                                let start = parent_end.unwrap_or(Vec3::ZERO);
+                                let end = start + direction * bone.length;
+                                
+                                positions.insert(bone.name.clone(), BonePosition { start, end });
+                                eprintln!("Added bone '{}' position: start={:?}, end={:?}", bone.name, start, end);
+                            }
+                        }
+                    }
+
+                    // Process bones in all nested subgroups recursively
+                    for (name, subgroup) in &group.subgroups {
+                        let new_path = if path.is_empty() {
+                            name.clone()
+                        } else {
+                            format!("{}.{}", path, name)
+                        };
+                        eprintln!("Processing subgroup: {}", new_path);
+                        process_group_bones(subgroup, &new_path, positions);
+                    }
+                }
+
+                // Keep processing until all bones are positioned
+                let mut last_size = 0;
                 while {
                     let start_size = positions.len();
                     
-                    // Helper function to process bones in a group and its subgroups
-                    fn process_group_bones(
-                        group: &BoneGroup,
-                        positions: &mut HashMap<String, BonePosition>
-                    ) {
-                        // Process bones in current group
-                        for bone in &group.bones {
-                            if !positions.contains_key(&bone.name) {
-                                let parent_end = if bone.parent.is_empty() {
-                                    None
-                                } else {
-                                    let parent_name = bone.parent.strip_prefix("bones.").unwrap_or(&bone.parent);
-                                    positions.get(parent_name).map(|p| p.end)
-                                };
-                                
-                                if parent_end.is_some() || bone.parent.is_empty() {
-                                    let direction = calculate_direction(bone.orientation, bone.slope);
-                                    let start = parent_end.unwrap_or(Vec3::ZERO);
-                                    let end = start + direction * bone.length;
-                                    
-                                    positions.insert(bone.name.clone(), BonePosition { start, end });
-                                }
-                            }
-                        }
-
-                        // Process bones in subgroups
-                        for (_, subgroup) in &group.subgroups {
-                            process_group_bones(subgroup, positions);
-                        }
+                    // Process all groups and their subgroups
+                    for (name, group) in &self.groups {
+                        eprintln!("Processing top-level group: {}", name);
+                        process_group_bones(group, name, &mut positions);
                     }
 
-                    // Process all groups
-                    for (_, group) in &self.groups {
-                        process_group_bones(group, &mut positions);
-                    }
+                    positions.len() > last_size
+                } {
+                    last_size = positions.len();
+                }
 
-                    // Continue if we added any new bones
-                    positions.len() > start_size
-                } {}
+                eprintln!("\n=== Position Resolution Summary ===");
+                eprintln!("Total positions calculated: {}", positions.len());
+                for name in positions.keys() {
+                    eprintln!("Calculated position for: {}", name);
+                }
 
                 POSITIONS = Some(positions);
             });

@@ -19,14 +19,17 @@ bones = [
 ]
 
 [groups.right_arm.subgroups]
-[groups.right_arm.subgroups.thumb]
+
+[groups.right_arm.subgroups.fingers]
+
+[groups.right_arm.subgroups.fingers.subgroups.thumb]
 bones = [
     { name = "thumb_lower_right", parent = "wrist_right", orientation = 270, slope = 90, rotation = 0, length = 0.1 },
     { name = "thumb_intermediate_right", parent = "thumb_lower_right", orientation = 270, slope = 90, rotation = 0, length = 0.1 },
     { name = "thumb_upper_right", parent = "thumb_intermediate_right", orientation = 270, slope = 90, rotation = 0, length = 0.1 }
 ]
 
-[groups.right_arm.subgroups.index]
+[groups.right_arm.subgroups.fingers.subgroups.index]
 bones = [
     { name = "palm_index_right", parent = "wrist_right", orientation = 170, slope = 120, rotation = 0, length = 0.1 },
     { name = "index_finger_lower_right", parent = "palm_index_right", orientation = 170, slope = 120, rotation = 0, length = 0.1 },
