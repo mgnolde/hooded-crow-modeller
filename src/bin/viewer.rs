@@ -267,6 +267,12 @@ fn setup(
 ) {
     println!("\n=== Setup Starting ===");
 
+    // Find the pelvis position to use as offset
+    let offset = mesh_data.positions.iter()
+        .find(|(name, _)| name.contains("body.left_leg.pelvis"))
+        .map(|(_, pos)| pos.start)
+        .unwrap_or(Vec3::ZERO);
+
     // Add coordinate axes only if enabled
     if show_axes.0 {
         spawn_coordinate_axes(&mut commands, &mut meshes, &mut materials);
@@ -311,7 +317,8 @@ fn setup(
         PbrBundle {
             mesh: meshes.add(mesh),
             material: materials.add(create_material()),
-            transform: Transform::from_scale(Vec3::splat(5.0)),
+            transform: Transform::from_scale(Vec3::splat(5.0))
+                .with_translation(-offset * 5.0),  // Offset the model to center on pelvis
             ..default()
         },
         CleanupMarker,
@@ -408,23 +415,36 @@ fn orbit_camera(
     mut mouse_wheel: EventReader<MouseWheel>,
 ) {
     let mut transform = query.single_mut();
+    let rotation_center = Vec3::ZERO;
 
     // Handle mouse wheel for zoom
     let zoom_speed = 0.2;
     for event in mouse_wheel.read() {
-        let forward = transform.forward();
-        transform.translation += forward * event.y * zoom_speed;
+        let dir = (rotation_center - transform.translation).normalize();
+        transform.translation += dir * event.y * zoom_speed;
     }
 
     // Handle rotation
     if keyboard.pressed(MouseButton::Left) {
         for event in mouse_motion.read() {
-            // Create rotation quaternions for x and y axes
-            let pitch = Quat::from_rotation_x(-event.delta.y * 0.005);
-            let yaw = Quat::from_rotation_y(-event.delta.x * 0.005);
+            let sensitivity = 0.005;
             
-            // Apply rotations
-            transform.rotation = yaw * transform.rotation * pitch;
+            // Apply yaw rotation first (around global Y axis)
+            let yaw = Quat::from_axis_angle(Vec3::Y, -event.delta.x * sensitivity);
+            
+            // Then pitch (around local X axis)
+            let right: Vec3 = transform.right().into();  // Convert Direction3d to Vec3
+            let pitch = Quat::from_axis_angle(right, -event.delta.y * sensitivity);
+            
+            // Calculate new position
+            let arm = transform.translation - rotation_center;
+            let rotated_arm = yaw * pitch * arm;
+            
+            // Update transform
+            transform.translation = rotation_center + rotated_arm;
+            transform.look_at(rotation_center, Vec3::Y);
+            
+            eprintln!("Mouse delta: {:?}, New position: {:?}", event.delta, transform.translation);
         }
     }
 }
@@ -766,7 +786,9 @@ fn calculate_positions(groups: &HashMap<String, Group>) -> HashMap<String, BoneP
                 bone.rotation,
                 bone.length
             ));
-            eprintln!("  Added bone: {} (parent: {})", bone.name, bone.parent);
+            if bone.parent.is_empty() {
+                eprintln!("Found root bone: {} (parent: \"\")", bone.name);
+            }
         }
         
         // Process all subgroups
@@ -776,20 +798,14 @@ fn calculate_positions(groups: &HashMap<String, Group>) -> HashMap<String, BoneP
             } else {
                 format!("{}.{}", path, name)
             };
-            eprintln!("  Entering subgroup: {}", new_path);
             collect_bones(subgroup, &new_path, pending);
         }
     }
     
     // Collect all bones
-    eprintln!("\n=== Starting Bone Collection ===");
     for (name, group) in groups {
-        eprintln!("Processing top-level group: {}", name);
         collect_bones(group, name, &mut pending_bones);
     }
-    
-    eprintln!("\n=== Starting Position Calculation ===");
-    eprintln!("Total bones to process: {}", pending_bones.len());
     
     // Process bones until no more can be added
     let mut iteration = 0;
@@ -798,11 +814,9 @@ fn calculate_positions(groups: &HashMap<String, Group>) -> HashMap<String, BoneP
         made_progress = false;
         let mut remaining = Vec::new();
         
-        eprintln!("\nIteration {}", iteration);
-        eprintln!("Bones remaining: {}", pending_bones.len());
-        
         for (name, parent, orientation, slope, rotation, length) in pending_bones.drain(..) {
             let parent_end = if parent.is_empty() {
+                eprintln!("Setting root bone {} position to Vec3::ZERO", name);
                 Some(Vec3::ZERO)
             } else {
                 positions.get(&parent).map(|p: &BonePosition| p.end)
@@ -812,10 +826,13 @@ fn calculate_positions(groups: &HashMap<String, Group>) -> HashMap<String, BoneP
                 let direction = calculate_direction(orientation, slope);
                 let end = start + direction * length;
                 positions.insert(name.clone(), BonePosition { start, end });
-                eprintln!("  Positioned: {} at {:?} to {:?}", name, start, end);
+                
+                if parent.is_empty() {
+                    eprintln!("Root bone {} position: start={:?}, end={:?}", name, start, end);
+                }
+                
                 made_progress = true;
             } else {
-                eprintln!("  Deferred: {} (waiting for parent: {})", name, parent);
                 remaining.push((name, parent, orientation, slope, rotation, length));
             }
         }
@@ -824,16 +841,11 @@ fn calculate_positions(groups: &HashMap<String, Group>) -> HashMap<String, BoneP
         iteration += 1;
     }
     
-    if !pending_bones.is_empty() {
-        eprintln!("\n=== Warning: Unpositioned Bones ===");
-        for (name, parent, _, _, _, _) in &pending_bones {
-            eprintln!("Could not position {} (missing parent: {})", name, parent);
+    // Log all positions to verify
+    for (name, pos) in &positions {
+        if name.contains("body.left_leg.pelvis") {
+            eprintln!("Final position of {}: start={:?}, end={:?}", name, pos.start, pos.end);
         }
-    }
-    
-    eprintln!("\n=== Final Position Count: {} ===", positions.len());
-    for name in positions.keys() {
-        eprintln!("Positioned: {}", name);
     }
     
     positions
