@@ -189,15 +189,31 @@ fn check_file_changes(
     to_cleanup: Query<Entity, With<CleanupMarker>>,
     mut next_state: ResMut<NextState<ViewerState>>,
     camera_query: Query<&Transform, With<Camera>>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    show_axes: Res<ShowAxes>,
 ) {
     if let Ok(metadata) = std::fs::metadata(&file_watcher.path) {
         if let Ok(modified) = metadata.modified() {
             if modified > file_watcher.last_modified {
-                // Read and parse the TOML file first
+                println!("\n=== File Change Detected ===");
+                
+                // First, try to load and parse the new content
                 if let Ok(mesh_toml) = std::fs::read_to_string(&mesh_file.0) {
                     if let Ok(model) = toml::from_str::<Model>(&mesh_toml) {
-                        // Prepare new mesh data before cleanup
+                        // Prepare all new resources
                         let mesh_data = MeshData::from(model);
+                        let bone_mesh = meshes.add(create_mesh(&mesh_data));
+                        let bone_material = materials.add(create_material());
+                        let joint_mesh = meshes.add(Mesh::from(shape::UVSphere {
+                            radius: 0.005,
+                            sectors: 8,
+                            stacks: 8,
+                        }));
+                        let joint_material = materials.add(StandardMaterial {
+                            base_color: Color::rgb(0.8, 0.2, 0.2),
+                            ..default()
+                        });
                         
                         // Store camera transform
                         if let Ok(camera_transform) = camera_query.get_single() {
@@ -206,17 +222,57 @@ fn check_file_changes(
                             });
                         }
                         
-                        // Update timestamp before cleanup
+                        // Only after successful preparation, update the scene
                         file_watcher.last_modified = modified;
+                        commands.insert_resource(mesh_data);
                         
-                        // Quick cleanup and resource update
+                        // Cleanup old entities
                         for entity in to_cleanup.iter() {
                             commands.entity(entity).despawn_recursive();
                         }
                         
-                        // Insert new data and trigger reload immediately
-                        commands.insert_resource(mesh_data);
-                        next_state.set(ViewerState::Loading);
+                        // Spawn new entities immediately
+                        // Spawn bones
+                        commands.spawn((
+                            PbrBundle {
+                                mesh: bone_mesh,
+                                material: bone_material,
+                                transform: Transform::from_scale(Vec3::splat(5.0)),
+                                ..default()
+                            },
+                            CleanupMarker,
+                        ));
+                        
+                        // Spawn camera and light
+                        let camera_transform = camera_query
+                            .get_single()
+                            .map(|t| *t)
+                            .unwrap_or_else(|_| Transform::from_xyz(-2.0, 2.5, 5.0).looking_at(Vec3::ZERO, Vec3::Y));
+                        
+                        commands.spawn((
+                            Camera3dBundle {
+                                transform: camera_transform,
+                                ..default()
+                            },
+                            CleanupMarker,
+                        ));
+                        
+                        commands.spawn((
+                            PointLightBundle {
+                                point_light: PointLight {
+                                    intensity: 1500.0,
+                                    shadows_enabled: true,
+                                    ..default()
+                                },
+                                transform: Transform::from_xyz(4.0, 8.0, 4.0),
+                                ..default()
+                            },
+                            CleanupMarker,
+                        ));
+                        
+                        // Mark scene as ready
+                        commands.spawn((SceneReady, CleanupMarker));
+                        next_state.set(ViewerState::Viewing);
                     }
                 }
             }

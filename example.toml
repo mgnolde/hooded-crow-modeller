@@ -36,7 +36,7 @@ bones = [
 
 [body.legs.left]
 bones = [
-    { name = "body.left_leg.pelvis", parent = "", orientation = 70, slope = 90, rotation = 0, length = 0.3 },
+    { name = "body.left_leg.pelvis", parent = "", orientation = 40, slope = 90, rotation = 0, length = 0.3 },
     { name = "body.left_leg.upper_leg", parent = "body.left_leg.pelvis", orientation = 90, slope = 180, rotation = 0, length = 0.3 }
 ]
 
