@@ -1,12 +1,20 @@
 use bevy::{
     prelude::*,
+    input::mouse::{MouseMotion, MouseWheel},
     render::{
-        mesh::Indices,
+        mesh::{shape, Indices},
         render_resource::PrimitiveTopology,
         render_asset::RenderAssetUsages,
     },
-    window::PrimaryWindow,
+    window::PresentMode,
 };
+use serde::Deserialize;
+use std::{
+    collections::{HashMap, BTreeMap},
+    path::{Path, PathBuf},
+    time::SystemTime,
+};
+use hooded_crow_modeller::{Model, Group};
 use bevy_egui::{egui, EguiPlugin, EguiContexts};
 use gltf_json::{
     self as json,
@@ -20,15 +28,6 @@ use gltf_json::{
     Scene,
     Root,
 };
-use std::{
-    collections::{BTreeMap, HashMap},
-    path::{PathBuf, Path},
-    time::SystemTime,
-    sync::Once,
-};
-use serde::{Deserialize, Serialize};
-use bevy::input::mouse::MouseMotion;
-use hooded_crow_modeller::{Model, Group};
 
 #[derive(Resource)]
 struct FileWatcherResource {
@@ -78,17 +77,17 @@ struct Bone {
     parent: String,
 }
 
-#[derive(Resource)]
+#[derive(Resource, Clone)]
 struct MeshData {
     positions: HashMap<String, BonePosition>,
     vertices: Vec<[f32; 3]>,
     indices: Vec<u32>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 struct BonePosition {
-    pub start: Vec3,
-    pub end: Vec3,
+    start: Vec3,
+    end: Vec3,
 }
 
 impl From<Model> for MeshData {
@@ -144,7 +143,7 @@ enum ViewerSystem {
 enum ViewerState {
     #[default]
     Loading,
-    Ready,
+    Viewing,
 }
 
 impl MeshData {
@@ -172,47 +171,159 @@ fn calculate_direction(orientation: f32, slope: f32) -> Vec3 {
     )
 }
 
-pub fn setup(
+#[derive(Resource)]
+struct CameraState {
+    transform: Transform,
+}
+
+#[derive(Resource, Clone)]
+struct PendingScene {
+    mesh_data: MeshData,
+    camera_transform: Transform,
+}
+
+fn check_file_changes(
+    mut commands: Commands,
+    mut file_watcher: ResMut<FileWatcherResource>,
+    mesh_file: Res<MeshFile>,
+    to_cleanup: Query<Entity, With<CleanupMarker>>,
+    mut next_state: ResMut<NextState<ViewerState>>,
+    camera_query: Query<&Transform, With<Camera>>,
+) {
+    if let Ok(metadata) = std::fs::metadata(&file_watcher.path) {
+        if let Ok(modified) = metadata.modified() {
+            if modified > file_watcher.last_modified {
+                // Read and parse the TOML file first
+                if let Ok(mesh_toml) = std::fs::read_to_string(&mesh_file.0) {
+                    if let Ok(model) = toml::from_str::<Model>(&mesh_toml) {
+                        // Prepare new mesh data before cleanup
+                        let mesh_data = MeshData::from(model);
+                        
+                        // Store camera transform
+                        if let Ok(camera_transform) = camera_query.get_single() {
+                            commands.insert_resource(CameraState {
+                                transform: *camera_transform,
+                            });
+                        }
+                        
+                        // Update timestamp before cleanup
+                        file_watcher.last_modified = modified;
+                        
+                        // Quick cleanup and resource update
+                        for entity in to_cleanup.iter() {
+                            commands.entity(entity).despawn_recursive();
+                        }
+                        
+                        // Insert new data and trigger reload immediately
+                        commands.insert_resource(mesh_data);
+                        next_state.set(ViewerState::Loading);
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn handle_loading_state(
+    mut commands: Commands,
+    to_cleanup: Query<Entity, With<CleanupMarker>>,
+    pending_scene: Option<Res<PendingScene>>,
+    mut next_state: ResMut<NextState<ViewerState>>,
+) {
+    if let Some(pending_scene) = pending_scene {
+        println!("Handling loading state with pending scene");
+        // Clean up old scene
+        for entity in to_cleanup.iter() {
+            commands.entity(entity).despawn_recursive();
+        }
+        
+        if to_cleanup.is_empty() {
+            println!("Cleanup complete, inserting new resources");
+            // Insert the new resources
+            commands.insert_resource(pending_scene.mesh_data.clone());
+            commands.insert_resource(CameraState {
+                transform: pending_scene.camera_transform,
+            });
+            
+            // Remove the pending scene
+            commands.remove_resource::<PendingScene>();
+            
+            // Transition to viewing state
+            next_state.set(ViewerState::Viewing);
+            println!("Transitioned to Viewing state");
+        }
+    }
+}
+
+fn setup(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mesh_data: Res<MeshData>,
     show_axes: Res<ShowAxes>,
     show_labels: Res<ShowLabels>,
+    camera_state: Option<Res<CameraState>>,
+    mut next_state: ResMut<NextState<ViewerState>>,
 ) {
-    println!("\n=== Starting scene setup ===");
+    println!("\n=== Setup Starting ===");
 
     // Add coordinate axes only if enabled
     if show_axes.0 {
         spawn_coordinate_axes(&mut commands, &mut meshes, &mut materials);
     }
 
-    // Add bones
-    commands.spawn((
-        PbrBundle {
-            mesh: meshes.add(create_mesh(&mesh_data)),
-            material: materials.add(create_material()),
-            transform: Transform::from_xyz(0.0, 0.0, 0.0)
-                .with_scale(Vec3::splat(5.0)),
-            ..default()
-        },
-        CleanupMarker,
-    ));
+    // Add 3D camera, using stored transform if available
+    let camera_transform = camera_state
+        .map(|state| state.transform)
+        .unwrap_or_else(|| Transform::from_xyz(-2.0, 2.5, 5.0).looking_at(Vec3::ZERO, Vec3::Y));
 
-    // Add 3D camera looking straight down Z axis
     commands.spawn((
         Camera3dBundle {
-            transform: Transform::from_xyz(0.0, 0.0, 20.0)
-                .looking_at(Vec3::ZERO, Vec3::Y),
+            transform: camera_transform,
+            camera: Camera {
+                order: 0,
+                ..default()
+            },
             ..default()
         },
         CleanupMarker,
     ));
+    println!("Camera spawned");
+
+    // Light setup
+    commands.spawn((
+        PointLightBundle {
+            point_light: PointLight {
+                intensity: 1500.0,
+                shadows_enabled: true,
+                ..default()
+            },
+            transform: Transform::from_xyz(4.0, 8.0, 4.0),
+            ..default()
+        },
+        CleanupMarker,
+    ));
+    println!("Light spawned");
+
+    // Create and spawn the bone mesh
+    let mesh = create_mesh(&mesh_data);
+    commands.spawn((
+        PbrBundle {
+            mesh: meshes.add(mesh),
+            material: materials.add(create_material()),
+            transform: Transform::from_scale(Vec3::splat(5.0)),
+            ..default()
+        },
+        CleanupMarker,
+    ));
+    println!("Bone mesh spawned");
 
     // Mark scene as ready
     commands.spawn((SceneReady, CleanupMarker));
-    commands.insert_resource(NextState(Some(ViewerState::Ready)));
-    println!("Scene setup complete");
+    
+    // Transition to viewing state
+    next_state.set(ViewerState::Viewing);
+    println!("=== Setup Complete, transitioning to Viewing state ===\n");
 }
 
 fn spawn_coordinate_axes(
@@ -287,86 +398,33 @@ fn cleanup_scene(
     for entity in to_cleanup.iter() {
         commands.entity(entity).despawn_recursive();
     }
-    commands.insert_resource(NextState(Some(ViewerState::Loading)));
     println!("Scene cleanup complete");
 }
 
-fn check_file_changes(
-    mut commands: Commands,
-    mut file_watcher: ResMut<FileWatcherResource>,
-    mesh_file: Res<MeshFile>,
-    _export_path: Res<ExportPath>,  // Prefix with underscore since it's unused
-    to_cleanup: Query<Entity, With<CleanupMarker>>,
-) {
-    if let Ok(metadata) = std::fs::metadata(&file_watcher.path) {
-        if let Ok(modified) = metadata.modified() {
-            if modified > file_watcher.last_modified {
-                println!("File changed, cleaning up scene...");
-                cleanup_scene(&mut commands, to_cleanup);
-                
-                println!("Reloading...");
-                file_watcher.last_modified = modified;
-
-                // Read and parse the TOML file
-                if let Ok(mesh_toml) = std::fs::read_to_string(&mesh_file.0) {
-                    if let Ok(model) = toml::from_str::<Model>(&mesh_toml) {
-                        let mesh_data = MeshData::from(model);
-                        commands.insert_resource(mesh_data);
-                    }
-                }
-            }
-        }
-    }
-}
-
 fn orbit_camera(
-    time: Res<Time>,
-    mut query: Query<&mut Transform, (With<Camera3d>, Without<UiCamera>)>,
-    window_query: Query<&Window, With<PrimaryWindow>>,
-    buttons: Res<ButtonInput<MouseButton>>,
+    mut query: Query<&mut Transform, With<Camera>>,
     mut mouse_motion: EventReader<MouseMotion>,
+    keyboard: Res<ButtonInput<MouseButton>>,
+    mut mouse_wheel: EventReader<MouseWheel>,
 ) {
-    let window = window_query.get_single().unwrap();
-    
-    for mut transform in query.iter_mut() {
-        if buttons.pressed(MouseButton::Left) {
-            // Manual camera control with mouse drag
-            for ev in mouse_motion.read() {
-                let rotation_speed = 0.5;
-                let angle_x = ev.delta.x * rotation_speed * time.delta_seconds();
-                let angle_y = ev.delta.y * rotation_speed * time.delta_seconds();
+    let mut transform = query.single_mut();
 
-                // Get the camera's current position
-                let distance = transform.translation.length();
-                
-                // Rotate around global Y axis first
-                transform.rotate_around(
-                    Vec3::ZERO,
-                    Quat::from_rotation_y(-angle_x),
-                );
-                
-                // Then rotate around global X axis
-                transform.rotate_around(
-                    Vec3::ZERO,
-                    Quat::from_rotation_x(-angle_y),
-                );
-                
-                // Maintain distance
-                let direction = transform.translation.normalize();
-                transform.translation = direction * distance;
-                
-                // Look at center
-                transform.look_at(Vec3::ZERO, Vec3::Y);
-            }
-        } else if !window.cursor.visible {
-            // Automatic rotation when cursor is hidden
-            let angle = time.elapsed_seconds() * 0.5;
-            transform.translation = Vec3::new(
-                angle.cos() * 20.0,
-                10.0,
-                angle.sin() * 20.0,
-            );
-            transform.look_at(Vec3::ZERO, Vec3::Y);
+    // Handle mouse wheel for zoom
+    let zoom_speed = 0.2;
+    for event in mouse_wheel.read() {
+        let forward = transform.forward();
+        transform.translation += forward * event.y * zoom_speed;
+    }
+
+    // Handle rotation
+    if keyboard.pressed(MouseButton::Left) {
+        for event in mouse_motion.read() {
+            // Create rotation quaternions for x and y axes
+            let pitch = Quat::from_rotation_x(-event.delta.y * 0.005);
+            let yaw = Quat::from_rotation_y(-event.delta.x * 0.005);
+            
+            // Apply rotations
+            transform.rotation = yaw * transform.rotation * pitch;
         }
     }
 }
@@ -566,21 +624,28 @@ fn draw_labels(
     let (camera, camera_transform) = camera.single();
     let window = windows.single();
     let scale = 5.0;  // Same scale as used in setup for the bones
+    let label_offset = Vec3::new(0.02, 0.02, 0.0);  // Smaller offset to prevent overlap
 
     let mut ctx = egui_contexts.ctx_mut();
     
     for (name, position) in positions.iter() {
+        // Calculate the midpoint between start and end, then add offset
+        let midpoint = (position.start + position.end) * 0.5 + label_offset;
+        
         if let Some(screen_pos) = world_to_screen(
             window,
             camera,
             camera_transform,
-            position.end * scale,
+            midpoint * scale,
         ) {
+            // Extract the last part of the bone name (after the last dot)
+            let display_name = name.split('.').last().unwrap_or(name);
+            
             egui::Area::new(egui::Id::new(name))
                 .fixed_pos(egui::pos2(screen_pos.x, screen_pos.y))
                 .show(ctx, |ui| {
                     ui.style_mut().text_styles.get_mut(&egui::TextStyle::Body).unwrap().size = 8.0;
-                    ui.colored_label(egui::Color32::WHITE, name);  // Changed to white color
+                    ui.colored_label(egui::Color32::WHITE, display_name);
                 });
         }
     }
@@ -621,7 +686,13 @@ fn draw_joints(
         gizmos.sphere(
             position.start * scale,
             Quat::IDENTITY,
-            0.25,
+            0.05,
+            Color::RED,
+        );
+        gizmos.sphere(
+            position.end * scale,
+            Quat::IDENTITY,
+            0.05,
             Color::RED,
         );
     }
@@ -784,6 +855,73 @@ fn create_mesh_data(positions: &HashMap<String, BonePosition>) -> (Vec<[f32; 3]>
     (vertices, indices)
 }
 
+fn setup_labels(
+    mut commands: Commands,
+    mesh_data: Res<MeshData>,
+) {
+    for (name, position) in &mesh_data.positions {
+        // Extract the last part of the bone name (after the last dot)
+        let display_name = name.split('.').last().unwrap_or(name);
+        
+        let text_style = TextStyle {
+            font_size: 20.0,
+            color: Color::WHITE,
+            ..default()
+        };
+        
+        let text = Text::from_section(display_name.to_string(), text_style);
+        
+        commands.spawn((
+            Text2dBundle {
+                text,
+                transform: Transform::from_translation(position.end),
+                ..default()
+            },
+            CleanupMarker,
+        ));
+    }
+}
+
+fn setup_joints(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    mesh_data: Res<MeshData>,
+) {
+    let joint_mesh = meshes.add(Mesh::from(shape::UVSphere {
+        radius: 0.005,
+        sectors: 8,
+        stacks: 8,
+    }));
+
+    let joint_material = materials.add(StandardMaterial {
+        base_color: Color::rgb(0.8, 0.2, 0.2),
+        ..default()
+    });
+
+    for position in mesh_data.positions.values() {
+        commands.spawn((
+            PbrBundle {
+                mesh: joint_mesh.clone(),
+                material: joint_material.clone(),
+                transform: Transform::from_translation(position.start * 5.0),
+                ..default()
+            },
+            CleanupMarker,
+        ));
+
+        commands.spawn((
+            PbrBundle {
+                mesh: joint_mesh.clone(),
+                material: joint_material.clone(),
+                transform: Transform::from_translation(position.end * 5.0),
+                ..default()
+            },
+            CleanupMarker,
+        ));
+    }
+}
+
 fn main() {
     // Get command line arguments
     let args: Vec<String> = std::env::args().collect();
@@ -816,7 +954,13 @@ fn main() {
 
     App::new()
         .add_plugins((
-            DefaultPlugins,
+            DefaultPlugins.set(WindowPlugin {
+                primary_window: Some(Window {
+                    present_mode: PresentMode::Immediate,
+                    ..default()
+                }),
+                ..default()
+            }),
             EguiPlugin,
         ))
         .init_state::<ViewerState>()
@@ -826,13 +970,14 @@ fn main() {
         .insert_resource(MeshFile(PathBuf::from(mesh_file)))
         .insert_resource(ShowAxes(show_axes))
         .insert_resource(ShowLabels(show_labels))
-        .add_systems(Startup, setup)
-        .add_systems(Update, (
-            setup_camera,
-            orbit_camera,
-            draw_labels,
-            draw_joints,
-            check_file_changes,
-        ))
+        .add_systems(Startup, |mut next_state: ResMut<NextState<ViewerState>>| {
+            next_state.set(ViewerState::Loading);
+        })
+        .add_systems(OnEnter(ViewerState::Loading), setup)
+        .add_systems(Update, setup_camera)
+        .add_systems(Update, orbit_camera)
+        .add_systems(Update, draw_labels)
+        .add_systems(Update, draw_joints)
+        .add_systems(Update, check_file_changes)
         .run();
 }
