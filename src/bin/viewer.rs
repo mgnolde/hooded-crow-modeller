@@ -57,6 +57,9 @@ struct ShowAxes(bool);
 #[derive(Resource)]
 struct ShowLabels(bool);
 
+#[derive(Resource)]
+struct ShowJoints(bool);
+
 #[derive(Debug, Deserialize)]
 #[serde(untagged)]
 pub enum Value {
@@ -318,6 +321,7 @@ fn setup(
     mesh_data: Res<MeshData>,
     show_axes: Res<ShowAxes>,
     show_labels: Res<ShowLabels>,
+    show_joints: Res<ShowJoints>,
     camera_state: Option<Res<CameraState>>,
     mut next_state: ResMut<NextState<ViewerState>>,
 ) {
@@ -754,7 +758,13 @@ fn create_material() -> StandardMaterial {
 fn draw_joints(
     mesh_data: Res<MeshData>,
     mut gizmos: Gizmos,
+    show_joints: Res<ShowJoints>,
 ) {
+    // Early return if joints are disabled
+    if !show_joints.0 {
+        return;
+    }
+
     let positions = mesh_data.resolve_positions();
     let scale = 5.0;
 
@@ -997,6 +1007,7 @@ fn main() {
     // Check flags
     let show_axes = args.iter().any(|arg| arg == "--show-axis");
     let show_labels = args.iter().any(|arg| arg == "--show-labels");
+    let show_joints = args.iter().any(|arg| arg == "--show-joints");
     
     // Get non-flag arguments (files)
     let file_args: Vec<_> = args.iter()
@@ -1038,6 +1049,7 @@ fn main() {
         .insert_resource(MeshFile(PathBuf::from(mesh_file)))
         .insert_resource(ShowAxes(show_axes))
         .insert_resource(ShowLabels(show_labels))
+        .insert_resource(ShowJoints(show_joints))
         .add_systems(Startup, |mut next_state: ResMut<NextState<ViewerState>>| {
             next_state.set(ViewerState::Loading);
         })
