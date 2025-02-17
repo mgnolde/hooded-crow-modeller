@@ -1,6 +1,6 @@
 [body]
   [body.lower_spine]
-  length = 0.5
+  length = 1.0
   orientation = 0
   slope = 10
   rotation = 0
@@ -10,6 +10,13 @@
   orientation = 100
   slope = 20
   rotation = 0
+
+[body.left_pelvis.left_leg]
+  length = 0.3
+  orientation = 100
+  slope = 20
+  rotation = 0
+
 
   [body.right_pelvis]
   length = 0.3

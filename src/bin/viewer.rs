@@ -17,17 +17,20 @@ use std::{
     process,
 };
 use hooded_crow_modeller::{Model, Group, Bone};
-use bevy_egui::{egui, EguiPlugin, EguiContexts, EguiStartupSet};
+use bevy_egui::{egui, EguiPlugin, EguiContexts};
 use gltf::json::{self, validation::{USize64, Checked}};
 use gltf::json::buffer::Stride;
 use bytemuck;
 use serde_json;
 
+#[derive(Debug, Clone, Copy)]
+struct BoneColor(pub [f32; 3]);
+
 #[derive(Debug, Clone)]
 struct BonePosition {
     start: Vec3,
     end: Vec3,
-    color: [f32; 3],
+    color: BoneColor,
 }
 
 #[derive(Resource, Clone)]
@@ -64,7 +67,7 @@ struct VisualizationSettings {
 
 #[derive(Resource)]
 struct ColorCache {
-    colors: BTreeMap<String, [f32; 3]>,
+    colors: BTreeMap<String, BoneColor>,
 }
 
 #[derive(Resource)]
@@ -98,7 +101,19 @@ impl Default for CameraController {
 struct ShowAxes(bool);
 
 #[derive(Resource)]
-struct LastUpdateTime(f64);
+struct LastModified(SystemTime);
+
+#[derive(Event)]
+struct FileChangedEvent {
+    model: Model,
+}
+
+fn hash_content(content: &str) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    content.hash(&mut hasher);
+    hasher.finish()
+}
 
 fn calculate_transform(orientation: f32, slope: f32, rotation: f32) -> Mat4 {
     // Convert angles to radians
@@ -219,7 +234,7 @@ fn get_bone_depth(bone_path: &str) -> usize {
     parts.len().saturating_sub(1)
 }
 
-fn get_rainbow_color(depth: usize, max_depth: usize) -> [f32; 3] {
+fn get_rainbow_color(depth: usize, max_depth: usize) -> BoneColor {
     // Map depth to hue (0.0 to 1.0)
     // Reverse the hue so that deeper bones are redder (more attention-grabbing)
     let hue = if max_depth > 1 {
@@ -230,7 +245,144 @@ fn get_rainbow_color(depth: usize, max_depth: usize) -> [f32; 3] {
     
     // Convert HSV to RGB with full saturation and value
     let (r, g, b) = hsv_to_rgb(hue, 0.8, 0.9);
-    [r, g, b]
+    BoneColor([r, g, b])
+}
+
+fn find_group<'a>(model: &'a Model, path: &str) -> Option<&'a Group> {
+    let parts: Vec<_> = path.split('.').collect();
+    if parts.is_empty() || parts[0] != "body" {
+        return None;
+    }
+
+    let mut current = model.0.get("body")?;
+    
+    for part in parts.iter().skip(1) {
+        current = current.subgroups.get(*part)?;
+    }
+    
+    Some(current)
+}
+
+fn process_bones_in_order(
+    model: &Model,
+    transforms: &mut HashMap<String, (Mat4, Vec3)>,
+    positions: &mut HashMap<String, (Vec3, Vec3)>,
+) {
+    // First find all bones and their depths
+    let mut bones_by_depth: BTreeMap<usize, Vec<String>> = BTreeMap::new();
+    
+    fn collect_bones(
+        group: &Group,
+        path: &str,
+        bones_by_depth: &mut BTreeMap<usize, Vec<String>>,
+    ) {
+        let depth = path.matches('.').count();
+        
+        // Add this group if it has bones
+        if !group.bones.is_empty() {
+            bones_by_depth
+                .entry(depth)
+                .or_default()
+                .push(path.to_string());
+        }
+        
+        // Recursively process subgroups
+        for (name, subgroup) in &group.subgroups {
+            let subpath = if path.is_empty() {
+                name.clone()
+            } else {
+                format!("{}.{}", path, name)
+            };
+            collect_bones(subgroup, &subpath, bones_by_depth);
+        }
+    }
+
+    // Collect all bones by their depth in the hierarchy
+    if let Some(body) = model.0.get("body") {
+        collect_bones(body, "body", &mut bones_by_depth);
+    }
+
+    println!("Found bones at depths: {:?}", bones_by_depth.keys().collect::<Vec<_>>());
+    for (depth, paths) in &bones_by_depth {
+        println!("Depth {}: {:?}", depth, paths);
+    }
+
+    // Process bones level by level, starting from the root (lowest depth)
+    for (depth, paths) in bones_by_depth {
+        for path in paths {
+            // Find parent path by removing the last segment
+            let parent_path = if depth > 1 {
+                path.rsplit_once('.')
+                    .map(|(parent, _)| parent)
+                    .unwrap_or("")
+                    .to_string()
+            } else {
+                String::new()
+            };
+
+            if let Some(group) = find_group(model, &path) {
+                println!("Processing bone at depth {}: {} (parent: {})", depth, path, parent_path);
+                
+                process_bone_group(
+                    group,
+                    Mat4::IDENTITY,
+                    Vec3::ZERO,
+                    &parent_path,
+                    transforms,
+                    positions,
+                    &path,
+                );
+            } else {
+                println!("Warning: Could not find group for path: {}", path);
+            }
+        }
+    }
+
+    println!("Processed {} bones", positions.len());
+    for (name, pos) in positions.iter() {
+        let (start, end) = pos;
+        println!("Bone {}: {} -> {}", name, start, end);
+    }
+}
+
+fn handle_file_changes(
+    mut file_events: EventReader<FileChangedEvent>,
+    mut commands: Commands,
+) {
+    for event in file_events.read() {
+        let mut mesh_data = MeshData::default();
+        let mut transforms = HashMap::new();
+        let mut positions = HashMap::new();
+        let mut color_map = BTreeMap::new();
+
+        // Process bones in hierarchical order
+        process_bones_in_order(&event.model, &mut transforms, &mut positions);
+
+        // Find maximum bone depth for color mapping
+        let max_depth = positions.keys()
+            .map(|path| get_bone_depth(path))
+            .max()
+            .unwrap_or(0);
+
+        println!("Found {} bones with max depth {}", positions.len(), max_depth);
+
+        // Create BonePosition structs with updated colors
+        for (name, (start, end)) in positions {
+            let depth = get_bone_depth(&name);
+            let color = get_rainbow_color(depth, max_depth);
+            mesh_data.positions.insert(name.clone(), BonePosition {
+                start,
+                end,
+                color,
+            });
+            color_map.insert(name, color);
+        }
+
+        // Update the mesh data and color cache
+        commands.insert_resource(mesh_data);
+        commands.insert_resource(ColorCache { colors: color_map.clone() });
+        println!("Model updated successfully!");
+    }
 }
 
 fn setup(
@@ -238,6 +390,12 @@ fn setup(
     mesh_file: Res<MeshFile>,
     export_path: Option<Res<ExportPath>>,
 ) {
+    // Initialize LastModified with current file modification time
+    let modified = fs::metadata(&mesh_file.0)
+        .and_then(|m| m.modified())
+        .unwrap_or_else(|_| SystemTime::now());
+    commands.insert_resource(LastModified(modified));
+
     // Read and parse TOML file
     let content = match fs::read_to_string(&mesh_file.0) {
         Ok(content) => content,
@@ -258,87 +416,28 @@ fn setup(
     // Initialize transform and position maps
     let mut transforms = HashMap::new();
     let mut positions = HashMap::new();
+    let mut color_map = BTreeMap::new();
 
-    // First process lower_spine as it's the root
-    if let Some(lower_spine_group) = model.0.get("body") {
-        if let Some(lower_spine) = lower_spine_group.subgroups.get("lower_spine") {
-            process_bone_group(
-                lower_spine,
-                Mat4::IDENTITY,
-                Vec3::ZERO,
-                "",
-                &mut transforms,
-                &mut positions,
-                "body.lower_spine",
-            );
-        }
-    }
+    // Process bones in hierarchical order
+    process_bones_in_order(&model, &mut transforms, &mut positions);
 
-    // Then process pelvis bones
-    if let Some(body_group) = model.0.get("body") {
-        // Process left and right pelvis, which connect to lower_spine
-        for pelvis_name in ["left_pelvis", "right_pelvis"] {
-            if let Some(pelvis_group) = body_group.subgroups.get(pelvis_name) {
-                process_bone_group(
-                    pelvis_group,
-                    Mat4::IDENTITY,
-                    Vec3::ZERO,
-                    "body.lower_spine",
-                    &mut transforms,
-                    &mut positions,
-                    &format!("body.{}", pelvis_name),
-                );
-            }
-        }
-
-        // Process leg bones that connect to pelvis
-        if let Some(right_pelvis) = body_group.subgroups.get("right_pelvis") {
-            for (subgroup_name, subgroup) in &right_pelvis.subgroups {
-                process_bone_group(
-                    subgroup,
-                    Mat4::IDENTITY,
-                    Vec3::ZERO,
-                    "body.right_pelvis",
-                    &mut transforms,
-                    &mut positions,
-                    &format!("body.right_pelvis.{}", subgroup_name),
-                );
-            }
-        }
-
-        // Process foot bones that connect to legs
-        if let Some(right_pelvis) = body_group.subgroups.get("right_pelvis") {
-            if let Some(right_leg) = right_pelvis.subgroups.get("right_leg") {
-                for (subgroup_name, subgroup) in &right_leg.subgroups {
-                    process_bone_group(
-                        subgroup,
-                        Mat4::IDENTITY,
-                        Vec3::ZERO,
-                        "body.right_pelvis.right_leg",
-                        &mut transforms,
-                        &mut positions,
-                        &format!("body.right_pelvis.right_leg.{}", subgroup_name),
-                    );
-                }
-            }
-        }
-    }
-
-    // Find maximum bone depth
+    // Find maximum bone depth for color mapping
     let max_depth = positions.keys()
         .map(|path| get_bone_depth(path))
         .max()
         .unwrap_or(0);
 
-    // Create mesh data from positions with rainbow colors
+    // Create mesh data
     let mut mesh_data = MeshData::default();
-    let mut color_map = BTreeMap::new();
-
-    for (bone_path, (start, end)) in positions.iter() {
-        let depth = get_bone_depth(bone_path);
+    for (name, (start, end)) in positions {
+        let depth = get_bone_depth(&name);
         let color = get_rainbow_color(depth, max_depth);
-        mesh_data.positions.insert(bone_path.clone(), BonePosition { start: *start, end: *end, color });
-        color_map.insert(bone_path.clone(), color);
+        mesh_data.positions.insert(name.clone(), BonePosition {
+            start,
+            end,
+            color,
+        });
+        color_map.insert(name, color);
     }
 
     // Set up camera
@@ -357,14 +456,38 @@ fn setup(
         visualization_mode: BoneVisualization::Solid,
         line_width: 5.0,
     });
-    commands.insert_resource(LastUpdateTime(SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs_f64()));
-    commands.insert_resource(ColorCache { colors: color_map });
+    commands.insert_resource(ColorCache { colors: color_map.clone() });
 
     if let Some(export_path) = export_path {
         commands.insert_resource(ExportState {
             path: export_path.0.clone(),
             exported: false,
         });
+    }
+}
+
+fn monitor_file(
+    mesh_file: Res<MeshFile>,
+    mut last_modified: ResMut<LastModified>,
+    mut file_events: EventWriter<FileChangedEvent>,
+) {
+    if let Ok(metadata) = fs::metadata(&mesh_file.0) {
+        if let Ok(modified) = metadata.modified() {
+            if modified > last_modified.0 {
+                if let Ok(content) = fs::read_to_string(&mesh_file.0) {
+                    match Model::from_toml(&content) {
+                        Ok(model) => {
+                            println!("\nFile changed, reloading model...");
+                            last_modified.0 = modified;
+                            file_events.send(FileChangedEvent { model });
+                        }
+                        Err(e) => {
+                            println!("\nInvalid TOML: {}", e);
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -430,6 +553,7 @@ fn update_camera(
 fn keyboard_input(
     keyboard: Res<ButtonInput<KeyCode>>,
     mut show_axes: ResMut<ShowAxes>,
+    mut commands: Commands,
 ) {
     if keyboard.just_pressed(KeyCode::KeyG) {
         show_axes.0 = !show_axes.0;
@@ -483,19 +607,17 @@ fn mouse_button_input(
 
 fn draw_bones(
     mut gizmos: Gizmos,
-    mesh_data: Res<MeshData>,
+    mesh_data: Option<Res<MeshData>>,
     _settings: Res<VisualizationSettings>,
 ) {
-    for bone_position in mesh_data.positions.values() {
-        gizmos.line(
-            bone_position.start,
-            bone_position.end,
-            Color::rgb(
-                bone_position.color[0],
-                bone_position.color[1],
-                bone_position.color[2],
-            ),
-        );
+    if let Some(mesh_data) = mesh_data {
+        for bone in mesh_data.positions.values() {
+            gizmos.line(
+                bone.start,
+                bone.end,
+                Color::rgb(bone.color.0[0], bone.color.0[1], bone.color.0[2])
+            );
+        }
     }
 }
 
@@ -545,56 +667,6 @@ fn update_ui(
         ui.add(egui::Slider::new(&mut settings.line_width, 0.1..=5.0)
             .text("Bone Thickness"));
     });
-}
-
-fn check_file_changes(
-    mesh_file: Res<MeshFile>,
-    mut last_update: ResMut<LastUpdateTime>,
-    mut commands: Commands,
-) {
-    if let Ok(metadata) = fs::metadata(&mesh_file.0) {
-        if let Ok(modified) = metadata.modified() {
-            let modified_time = modified
-                .duration_since(SystemTime::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs_f64();
-
-            if modified_time > last_update.0 {
-                if let Ok(content) = fs::read_to_string(&mesh_file.0) {
-                    if let Ok(model) = toml::from_str::<Model>(&content) {
-                        let mut mesh_data = MeshData::default();
-                        let mut transforms = HashMap::new();
-                        let mut positions = HashMap::new();
-
-                        // Process each top-level group
-                        for (group_name, group) in &model.0 {
-                            process_bone_group(
-                                group,
-                                Mat4::IDENTITY,
-                                Vec3::ZERO,
-                                "",
-                                &mut transforms,
-                                &mut positions,
-                                group_name,
-                            );
-                        }
-
-                        // Create BonePosition structs
-                        for (name, (start, end)) in positions {
-                            mesh_data.positions.insert(name, BonePosition {
-                                start,
-                                end,
-                                color: [1.0, 1.0, 1.0],
-                            });
-                        }
-
-                        commands.insert_resource(mesh_data);
-                        last_update.0 = modified_time;
-                    }
-                }
-            }
-        }
-    }
 }
 
 fn export_to_glb(mesh_data: &MeshData, export_path: &Path) -> Result<(), Box<dyn std::error::Error>> {
@@ -836,6 +908,7 @@ fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
         .add_plugins(EguiPlugin)
+        .add_event::<FileChangedEvent>()  // Register the event
         .insert_resource(MeshFile(mesh_file))
         .insert_resource(if let Some(path) = export_path {
             ExportPath(path)
@@ -844,6 +917,8 @@ fn main() {
         })
         .add_systems(Startup, setup)
         .add_systems(Update, (
+            monitor_file,
+            handle_file_changes.after(monitor_file),
             keyboard_input,
             mouse_motion,
             mouse_wheel,
@@ -852,7 +927,6 @@ fn main() {
             draw_bones,
             draw_axes,
             export_system,
-            check_file_changes,
             update_ui,
         ))
         .run();
