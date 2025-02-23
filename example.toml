@@ -1,36 +1,42 @@
 [body]
+  [body.upper_spine]
+  length = 1.0
+  orientation = 180
+  slope = 270
+  rotation = 0
+
   [body.lower_spine]
   length = 1.0
   orientation = 0
-  slope = 10
+  slope = -90
   rotation = 0
 
-  [body.left_pelvis]
+  [body.lower_spine.left_pelvis]
   length = 0.3
   orientation = 100
   slope = 20
   rotation = 0
 
-[body.left_pelvis.left_leg]
+[body.lower_spine.left_pelvis.left_leg]
   length = 0.3
   orientation = 100
   slope = 20
   rotation = 0
 
 
-  [body.right_pelvis]
+  [body.lower_spine.right_pelvis]
   length = 0.3
   orientation = -100
   slope = 30
   rotation = 0
 
-  [body.right_pelvis.right_leg]
+  [body.lower_spine.right_pelvis.right_leg]
   length = 0.4
   orientation = 0
   slope = 40
   rotation = 0
 
-  [body.right_pelvis.right_leg.foot]
+  [body.lower_spine.right_pelvis.right_leg.foot]
   length = 0.1
   orientation = 0
   slope = 10
