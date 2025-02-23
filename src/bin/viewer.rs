@@ -655,18 +655,71 @@ fn draw_axes(mut gizmos: Gizmos, show_axes: Res<ShowAxes>) {
 fn update_ui(
     mut contexts: EguiContexts,
     mut settings: ResMut<VisualizationSettings>,
+    mesh_data: Option<Res<MeshData>>,
+    camera_query: Query<(&Camera, &GlobalTransform), With<Camera>>,
+    _windows: Query<&Window>,
 ) {
-    egui::Window::new("Settings").show(contexts.ctx_mut(), |ui| {
-        ui.horizontal(|ui| {
-            ui.label("Visualization Mode:");
-            ui.radio_value(&mut settings.visualization_mode, BoneVisualization::Solid, "Solid");
-            ui.radio_value(&mut settings.visualization_mode, BoneVisualization::ByDepth, "By Depth");
-            ui.radio_value(&mut settings.visualization_mode, BoneVisualization::ByChain, "By Chain");
+    let ctx = contexts.ctx_mut();
+
+    egui::Window::new("Settings")
+        .show(ctx, |ui| {
+            ui.heading("Visualization Mode");
+            ui.horizontal(|ui| {
+                ui.radio_value(
+                    &mut settings.visualization_mode,
+                    BoneVisualization::Solid,
+                    "Solid",
+                );
+                ui.radio_value(
+                    &mut settings.visualization_mode,
+                    BoneVisualization::ByDepth,
+                    "By Depth",
+                );
+                ui.radio_value(
+                    &mut settings.visualization_mode,
+                    BoneVisualization::ByChain,
+                    "By Chain",
+                );
+            });
+
+            ui.add(
+                egui::Slider::new(&mut settings.line_width, 1.0..=10.0)
+                    .text("Bone Thickness"),
+            );
         });
-        
-        ui.add(egui::Slider::new(&mut settings.line_width, 0.1..=5.0)
-            .text("Bone Thickness"));
-    });
+
+    // Draw bone labels using egui
+    if let (Some(mesh_data), Ok((camera, camera_transform))) = (mesh_data.as_ref(), camera_query.get_single()) {
+        // First collect all the label data we need
+        let label_data: Vec<_> = mesh_data.positions.iter()
+            .filter_map(|(path, bone)| {
+                let name = path.split('.').last()?;
+                let center = bone.start.lerp(bone.end, 0.5);
+                let screen_pos = camera.world_to_viewport(camera_transform, center)?;
+                // Clone the color to avoid lifetime issues
+                let color = bone.color.0.clone();
+                Some((name.to_string(), screen_pos, color))
+            })
+            .collect();
+
+        // Then render the labels
+        for (name, screen_pos, color) in label_data {
+            egui::Area::new(egui::Id::new(name.as_str()))
+                .fixed_pos(egui::pos2(screen_pos.x, screen_pos.y))
+                .show(ctx, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.colored_label(
+                            egui::Color32::from_rgb(
+                                (color[0] * 255.0) as u8,
+                                (color[1] * 255.0) as u8,
+                                (color[2] * 255.0) as u8,
+                            ),
+                            name
+                        );
+                    });
+                });
+        }
+    }
 }
 
 fn export_to_glb(mesh_data: &MeshData, export_path: &Path) -> Result<(), Box<dyn std::error::Error>> {
