@@ -696,24 +696,18 @@ fn update_ui(
                 let name = path.split('.').last()?;
                 let center = bone.start.lerp(bone.end, 0.5);
                 let screen_pos = camera.world_to_viewport(camera_transform, center)?;
-                // Clone the color to avoid lifetime issues
-                let color = bone.color.0.clone();
-                Some((name.to_string(), screen_pos, color))
+                Some((name.to_string(), screen_pos))
             })
             .collect();
 
         // Then render the labels
-        for (name, screen_pos, color) in label_data {
+        for (name, screen_pos) in label_data {
             egui::Area::new(egui::Id::new(name.as_str()))
                 .fixed_pos(egui::pos2(screen_pos.x, screen_pos.y))
                 .show(ctx, |ui| {
                     ui.horizontal(|ui| {
                         ui.colored_label(
-                            egui::Color32::from_rgb(
-                                (color[0] * 255.0) as u8,
-                                (color[1] * 255.0) as u8,
-                                (color[2] * 255.0) as u8,
-                            ),
+                            egui::Color32::WHITE,
                             name
                         );
                     });
