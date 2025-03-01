@@ -47,14 +47,23 @@ impl Bone {
 }
 
 fn calculate_direction(orientation: f32, slope: f32) -> Vec3 {
-    let orientation_rad = orientation.to_radians();
-    let slope_rad = slope.to_radians();
+    eprintln!("\nCalculating direction for slope={}, orientation={}", slope, orientation);
     
-    Vec3::new(
-        slope_rad.cos() * orientation_rad.sin(),
-        slope_rad.sin(),
-        slope_rad.cos() * orientation_rad.cos()
-    ).normalize()
+    // For vertical slopes (±90°), use the raw slope value
+    if (slope - 90.0).abs() < 0.001 || (slope + 90.0).abs() < 0.001 {
+        // Convert slope to unit direction: +90° -> +1, -90° -> -1
+        let y = if slope > 0.0 { 1.0 } else { -1.0 };
+        Vec3::new(0.0, y, 0.0)
+    } else {
+        // For non-vertical slopes, use spherical coordinates
+        let orientation_rad = orientation.to_radians();
+        let slope_rad = slope.to_radians();
+        Vec3::new(
+            slope_rad.cos() * orientation_rad.sin(),
+            slope_rad.sin(),
+            slope_rad.cos() * orientation_rad.cos()
+        ).normalize()
+    }
 }
 
 impl Model {
@@ -283,24 +292,12 @@ impl Model {
 
     pub fn calculate_bone_positions(&self) -> Vec<(String, Vec3, Vec3, [f32; 3])> {
         let mut positions = Vec::new();
-        let mut bone_ends = HashMap::new();
         let bones = self.get_bones();
-        let depths = self.calculate_bone_depths();
         
         eprintln!("\n!!! CALCULATING BONE POSITIONS !!!");
         eprintln!("Found {} bones: {:?}", bones.len(), bones.keys().collect::<Vec<_>>());
-        eprintln!("Bone depths: {:?}", depths);
         
-        // Sort bones by depth to ensure we process parents before children
-        let mut bone_list: Vec<_> = bones.iter().collect();
-        bone_list.sort_by_key(|(name, _)| depths.get(*name).unwrap_or(&0));
-        
-        eprintln!("\n!!! SORTED BONES BY DEPTH !!!");
-        for (name, bone) in &bone_list {
-            eprintln!("  {} (depth: {})", name, depths.get(*name).unwrap_or(&0));
-        }
-        
-        for (name, bone) in bone_list {
+        for (name, bone) in bones {
             let level = name.matches('.').count();
             let color = match level {
                 0 => [1.0, 0.0, 0.0], // Red
@@ -318,17 +315,14 @@ impl Model {
             
             // Get base direction from orientation and slope
             let direction = calculate_direction(bone.orientation, bone.slope);
-            eprintln!("Base direction from orientation and slope: {:?}", direction);
+            eprintln!("Final direction vector: {:?}", direction);
             
-            // Apply rotation around the parent bone's direction if this is not the root bone
-            let final_direction = direction;
+            let end = start + (direction * bone.length);
+            eprintln!("Start: {:?}, End: {:?}", start, end);
             
-            let end = start + (final_direction * bone.length);
-            
-            bone_ends.insert(name.clone(), end);
             positions.push((name.clone(), start, end, color));
             
-            eprintln!("Final position: start={:?}, end={:?}, direction={:?}", start, end, final_direction);
+            eprintln!("Final position: start={:?}, end={:?}, direction={:?}", start, end, direction);
         }
         
         eprintln!("\n!!! BONE POSITIONS CALCULATED !!!");

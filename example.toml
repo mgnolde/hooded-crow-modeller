@@ -2,13 +2,13 @@
   [body.upper_spine]
   length = 1.0
   orientation = 180
-  slope = 270
+  slope = -90
   rotation = 0
 
   [body.lower_spine]
   length = 1.0
   orientation = 0
-  slope = -90
+  slope = 90
   rotation = 0
 
   [body.lower_spine.left_pelvis]

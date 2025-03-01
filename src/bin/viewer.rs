@@ -36,12 +36,14 @@ struct BonePosition {
 #[derive(Resource, Clone)]
 struct MeshData {
     positions: HashMap<String, BonePosition>,
+    transforms: HashMap<String, Mat4>,
 }
 
 impl Default for MeshData {
     fn default() -> Self {
         Self {
             positions: HashMap::new(),
+            transforms: HashMap::new(),
         }
     }
 }
@@ -122,11 +124,11 @@ fn calculate_transform(orientation: f32, slope: f32, rotation: f32) -> Mat4 {
     let rotation_rad = rotation.to_radians();
 
     // Create rotation matrices
-    let orientation_rot = Mat4::from_rotation_y(orientation_rad); // Around Y for orientation
-    let slope_rot = Mat4::from_rotation_x(slope_rad); // Around X for slope
-    let rotation_rot = Mat4::from_rotation_z(rotation_rad); // Around Z for rotation
+    let orientation_rot = Mat4::from_rotation_y(orientation_rad);
+    let slope_rot = Mat4::from_rotation_x(slope_rad);
+    let rotation_rot = Mat4::from_rotation_z(rotation_rad);
 
-    // Combine transformations: first orientation, then slope, then rotation
+    // Combine transformations in order: first orientation, then slope, then rotation
     orientation_rot * slope_rot * rotation_rot
 }
 
@@ -156,7 +158,7 @@ fn process_bone_group(
         } else {
             // Get parent's end position from the positions map
             match positions.get(parent_path) {
-                Some((start, end)) => {
+                Some((_, end)) => {
                     println!("Found parent {} at end: {:?}", parent_path, end);
                     *end
                 }
@@ -167,33 +169,22 @@ fn process_bone_group(
             }
         };
 
-        // Calculate bone direction based on angles
-        let orientation_rad = bone.orientation.to_radians();
-        let slope_rad = bone.slope.to_radians();
+        // Calculate bone's local transform
+        let local_transform = calculate_transform(bone.orientation, bone.slope, bone.rotation);
         
-        // Start with forward direction (along Z)
-        let mut direction = Vec3::new(0.0, 0.0, 1.0);
+        // Combine with parent transform
+        let world_transform = parent_transform * local_transform;
         
-        // Apply orientation (rotation around Y axis)
-        direction = Vec3::new(
-            direction.z * orientation_rad.sin(),
-            direction.y,
-            direction.z * orientation_rad.cos(),
-        ).normalize();
+        // Calculate direction using the world transform
+        let direction = world_transform.transform_vector3(Vec3::Z).normalize();
         
-        // Apply slope (rotation around local X axis)
-        direction = Vec3::new(
-            direction.x,
-            direction.z * slope_rad.sin(),
-            direction.z * slope_rad.cos(),
-        ).normalize();
-
-        // Calculate end position
+        // Calculate end position using the transformed direction
         let end = start + direction * bone.length;
         println!("Bone {} from {:?} to {:?}", bone_path, start, end);
 
-        // Store positions
+        // Store positions and transforms
         positions.insert(bone_path.clone(), (start, end));
+        transforms.insert(bone_path.clone(), (world_transform, end));
 
         // Process any subgroups
         for (subgroup_path, subgroup) in &group.subgroups {
@@ -210,7 +201,7 @@ fn process_bone_group(
                 
                 process_bone_group(
                     subgroup,
-                    parent_transform,
+                    world_transform, // Pass the bone's world transform to children
                     end,
                     bone_path,
                     transforms,
@@ -375,7 +366,12 @@ fn handle_file_changes(
                 end,
                 color,
             });
-            color_map.insert(name, color);
+            color_map.insert(name.clone(), color);
+            
+            // Store transforms
+            if let Some((transform, _)) = transforms.get(&name) {
+                mesh_data.transforms.insert(name.clone(), *transform);
+            }
         }
 
         // Update the mesh data and color cache
@@ -437,7 +433,12 @@ fn setup(
             end,
             color,
         });
-        color_map.insert(name, color);
+        color_map.insert(name.clone(), color);
+        
+        // Store transforms
+        if let Some((transform, _)) = transforms.get(&name) {
+            mesh_data.transforms.insert(name.clone(), *transform);
+        }
     }
 
     // Set up camera
@@ -612,6 +613,7 @@ fn draw_bones(
 ) {
     if let Some(mesh_data) = mesh_data {
         for bone in mesh_data.positions.values() {
+            // Draw bone using pre-transformed positions
             gizmos.line(
                 bone.start,
                 bone.end,
