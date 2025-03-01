@@ -37,7 +37,7 @@ struct BonePosition {
 struct MeshData {
     positions: HashMap<String, BonePosition>,
     transforms: HashMap<String, Mat4>,
-    skin_vertex_positions: Vec<(Vec3, [f32; 3])>, // Store skin vertex positions and colors
+    skin_vertex_positions: Vec<(Vec3, [f32; 3], Option<String>)>, // Store skin vertex positions, colors and IDs
 }
 
 impl Default for MeshData {
@@ -415,9 +415,12 @@ fn handle_file_changes(
                         // Use a rainbow color based on the bone depth
                         let color = get_rainbow_color(get_bone_depth(full_path.as_str()), max_depth).0;
                         
+                        // Use the ID from the skin_vert if available, otherwise use the bone path
+                        let id = skin_vert.id.or(Some(full_path.clone()));
+                        
                         // Add skin vertex to our collection
-                        skin_vertex_positions.push((position, color));
-                        println!("PROCESSING: Added skin vertex at {:?} for bone '{}'", position, full_path);
+                        skin_vertex_positions.push((position, color, id.clone()));
+                        println!("PROCESSING: Added skin vertex at {:?} for bone '{}' with id {:?}", position, full_path, id);
                     }
                 }
             }
@@ -426,8 +429,8 @@ fn handle_file_changes(
         // Create the final MeshData with debug output
         println!("*** SKIN VERTEX SUMMARY ***");
         println!("Total skin vertices processed: {}", skin_vertex_positions.len());
-        for (i, (pos, _)) in skin_vertex_positions.iter().enumerate() {
-            println!("Vertex {}: position={:?}", i, pos);
+        for (i, (pos, _, id)) in skin_vertex_positions.iter().enumerate() {
+            println!("Vertex {}: position={:?}, id={:?}", i, pos, id);
         }
 
         mesh_data.skin_vertex_positions = skin_vertex_positions;
@@ -488,7 +491,7 @@ fn setup(
 
     // Combine bone hierarchy with calculated positions
     let mut positions_with_colors: HashMap<String, (Vec3, Vec3, [f32; 3])> = HashMap::new();
-    let mut skin_vertex_positions: Vec<(Vec3, [f32; 3])> = Vec::new();
+    let mut skin_vertex_positions: Vec<(Vec3, [f32; 3], Option<String>)> = Vec::new();
     
     // Iterate through all bones in the model
     println!("SETUP: Processing bones for positions and skin vertices");
@@ -517,9 +520,12 @@ fn setup(
                 // Use a rainbow color based on the bone depth
                 let color = get_rainbow_color(bone_depth, max_depth).0;
                 
+                // Use the ID from the skin_vert if available, otherwise use the bone path
+                let id = skin_vert.id.or(Some(full_path.clone()));
+                
                 // Add skin vertex to our collection
-                skin_vertex_positions.push((position, color));
-                println!("PROCESSING: Added skin vertex at {:?} for bone '{}'", position, full_path);
+                skin_vertex_positions.push((position, color, id.clone()));
+                println!("PROCESSING: Added skin vertex at {:?} for bone '{}' with id {:?}", position, full_path, id);
             }
         }
     }
@@ -527,8 +533,8 @@ fn setup(
     // Create the final MeshData with debug output
     println!("*** SKIN VERTEX SUMMARY ***");
     println!("Total skin vertices processed: {}", skin_vertex_positions.len());
-    for (i, (pos, _)) in skin_vertex_positions.iter().enumerate() {
-        println!("Vertex {}: position={:?}", i, pos);
+    for (i, (pos, _, id)) in skin_vertex_positions.iter().enumerate() {
+        println!("Vertex {}: position={:?}, id={:?}", i, pos, id);
     }
 
     // Create mesh data
@@ -738,7 +744,7 @@ fn draw_bones(
         
         // Draw skin vertices as spheres
         println!("DRAWING: About to draw {} skin vertices", mesh_data.skin_vertex_positions.len());
-        for (i, (position, color)) in mesh_data.skin_vertex_positions.iter().enumerate() {
+        for (i, (position, color, _)) in mesh_data.skin_vertex_positions.iter().enumerate() {
             println!("DRAWING: Drawing skin vertex {} at position {:?}", i, position);
             
             // Draw a sphere at the vertex position
@@ -834,12 +840,38 @@ fn update_ui(
 
         // Then render the labels
         for (name, screen_pos) in label_data {
-            egui::Area::new(egui::Id::new(name.as_str()))
+            egui::Area::new(egui::Id::new(format!("bone_{}", name.as_str())))
                 .fixed_pos(egui::pos2(screen_pos.x, screen_pos.y))
                 .show(ctx, |ui| {
                     ui.horizontal(|ui| {
                         ui.colored_label(
                             egui::Color32::WHITE,
+                            name
+                        );
+                    });
+                });
+        }
+        
+        // Draw skin vertex labels using the same approach
+        let skin_vertex_label_data: Vec<_> = mesh_data.skin_vertex_positions.iter()
+            .filter_map(|(position, _, id)| {
+                // Only show labels for vertices that have an ID
+                let id = id.as_ref()?;
+                // Extract just the last part of the ID (after the last dot)
+                let name = id.split('.').last().unwrap_or(id);
+                let screen_pos = camera.world_to_viewport(camera_transform, *position)?;
+                Some((name.to_string(), screen_pos))
+            })
+            .collect();
+            
+        // Then render the skin vertex labels
+        for (name, screen_pos) in skin_vertex_label_data {
+            egui::Area::new(egui::Id::new(format!("skinvert_{}", name.as_str())))
+                .fixed_pos(egui::pos2(screen_pos.x, screen_pos.y))
+                .show(ctx, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.colored_label(
+                            egui::Color32::LIGHT_BLUE, // Use a different color to distinguish from bone labels
                             name
                         );
                     });
