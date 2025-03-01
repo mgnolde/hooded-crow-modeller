@@ -741,28 +741,8 @@ fn draw_bones(
         for (i, (position, color)) in mesh_data.skin_vertex_positions.iter().enumerate() {
             println!("DRAWING: Drawing skin vertex {} at position {:?}", i, position);
             
-            // Find the closest bone
-            let mut closest_bone_start = Vec3::ZERO;
-            let mut closest_distance = f32::MAX;
-            
-            for bone in mesh_data.positions.values() {
-                // Calculate distance from vertex to the bone's start point
-                let distance = (*position - bone.start).length();
-                if distance < closest_distance {
-                    closest_distance = distance;
-                    closest_bone_start = bone.start;
-                }
-            }
-            
-            // Draw a thick line from the closest bone to the vertex position
-            gizmos.line(
-                closest_bone_start,
-                *position,
-                Color::RED // Bright red
-            );
-            
             // Draw a sphere at the vertex position
-            let sphere_radius = 0.05; // Size of the sphere
+            let sphere_radius = 0.005; // Size of the sphere (reduced to 10% of original 0.05)
             gizmos.sphere(
                 *position,
                 Quat::IDENTITY,
