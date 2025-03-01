@@ -37,6 +37,7 @@ struct BonePosition {
 struct MeshData {
     positions: HashMap<String, BonePosition>,
     transforms: HashMap<String, Mat4>,
+    skin_vertex_positions: Vec<(Vec3, [f32; 3])>, // Store skin vertex positions and colors
 }
 
 impl Default for MeshData {
@@ -44,6 +45,7 @@ impl Default for MeshData {
         Self {
             positions: HashMap::new(),
             transforms: HashMap::new(),
+            skin_vertex_positions: Vec::new(),
         }
     }
 }
@@ -317,7 +319,7 @@ fn process_bones_in_order(
                 
                 // Get parent transform if available, otherwise use identity
                 let parent_transform = if !parent_path.is_empty() {
-                    transforms.get(&parent_path)
+                    transforms.get(parent_path.as_str())
                         .map(|(transform, _)| *transform)
                         .unwrap_or(Mat4::IDENTITY)
                 } else {
@@ -326,7 +328,7 @@ fn process_bones_in_order(
                 
                 // Get parent end position if available
                 let parent_end = if !parent_path.is_empty() {
-                    transforms.get(&parent_path)
+                    transforms.get(parent_path.as_str())
                         .map(|(_, end)| *end)
                         .unwrap_or(Vec3::ZERO)
                 } else {
@@ -337,7 +339,7 @@ fn process_bones_in_order(
                     group,
                     parent_transform, // Use parent transform instead of identity
                     parent_end,
-                    &parent_path,
+                    parent_path.as_str(),
                     transforms,
                     positions,
                     &path,
@@ -377,23 +379,58 @@ fn handle_file_changes(
         println!("Found {} bones with max depth {}", positions.len(), max_depth);
 
         // Create BonePosition structs with updated colors
-        for (name, (start, end)) in positions {
-            let depth = get_bone_depth(&name);
+        for (name, (start, end)) in &positions {
+            let depth = get_bone_depth(name);
             let color = get_rainbow_color(depth, max_depth);
             mesh_data.positions.insert(name.clone(), BonePosition {
-                start,
-                end,
+                start: *start,
+                end: *end,
                 color,
             });
             color_map.insert(name.clone(), color);
             
             // Store transforms
-            if let Some((transform, _)) = transforms.get(&name) {
+            if let Some((transform, _)) = transforms.get(name.as_str()) {
                 mesh_data.transforms.insert(name.clone(), *transform);
             }
         }
 
-        // Update the mesh data and color cache
+        // Process skin vertices for each bone
+        let mut skin_vertex_positions = Vec::new();
+        for (bone_path, group) in &event.model.0 {
+            for (bone_name, bone) in &group.bones {
+                let full_path = format!("{}.{}", bone_path, bone_name);
+                if let Some((start, end)) = positions.get(full_path.as_str()) {
+                    // Debug output for this bone
+                    println!("Processing skin vertices for bone: {}", full_path);
+                    println!("  Bone has {} skin vertices", bone.skin_verts.len());
+                    println!("  Bone position: start={:?}, end={:?}", start, end);
+                    
+                    let skin_verts = bone.skin_verts.clone();
+                    println!("PROCESSING: Bone '{}' has {} skin vertices", full_path, skin_verts.len());
+                    for skin_vert in skin_verts {
+                        // Calculate position of skin vertex using the bone's start and end
+                        let position = skin_vert.calculate_position(*start, *end);
+                        
+                        // Use a rainbow color based on the bone depth
+                        let color = get_rainbow_color(get_bone_depth(full_path.as_str()), max_depth).0;
+                        
+                        // Add skin vertex to our collection
+                        skin_vertex_positions.push((position, color));
+                        println!("PROCESSING: Added skin vertex at {:?} for bone '{}'", position, full_path);
+                    }
+                }
+            }
+        }
+
+        // Create the final MeshData with debug output
+        println!("*** SKIN VERTEX SUMMARY ***");
+        println!("Total skin vertices processed: {}", skin_vertex_positions.len());
+        for (i, (pos, _)) in skin_vertex_positions.iter().enumerate() {
+            println!("Vertex {}: position={:?}", i, pos);
+        }
+
+        mesh_data.skin_vertex_positions = skin_vertex_positions;
         commands.insert_resource(mesh_data);
         commands.insert_resource(ColorCache { colors: color_map.clone() });
         println!("Model updated successfully!");
@@ -428,6 +465,13 @@ fn setup(
         }
     };
 
+    // Process bones to build positions and skin vertices
+    let bones = model.get_bones();
+    println!("Found {} bones in the model", bones.len());
+    for (path, bone) in &bones {
+        println!("Processing bone: {} with {} skin vertices", path, bone.skin_verts.len());
+    }
+
     // Initialize transform and position maps
     let mut transforms = HashMap::new();
     let mut positions = HashMap::new();
@@ -442,23 +486,68 @@ fn setup(
         .max()
         .unwrap_or(0);
 
+    // Combine bone hierarchy with calculated positions
+    let mut positions_with_colors: HashMap<String, (Vec3, Vec3, [f32; 3])> = HashMap::new();
+    let mut skin_vertex_positions: Vec<(Vec3, [f32; 3])> = Vec::new();
+    
+    // Iterate through all bones in the model
+    println!("SETUP: Processing bones for positions and skin vertices");
+    let all_bones = model.get_bones();
+    println!("SETUP: Model has {} total bones", all_bones.len());
+    for (full_path, bone) in &all_bones {
+        println!("SETUP: Processing bone {} with {} skin verts", full_path, bone.skin_verts.len());
+        
+        // Store bone position and color
+        if let Some((start, end)) = positions.get(full_path.as_str()) {
+            let bone_depth = get_bone_depth(full_path.as_str());
+            let color = get_rainbow_color(bone_depth, max_depth).0;
+            positions_with_colors.insert(full_path.clone(), (*start, *end, color));
+            
+            // Process skin vertices for this bone
+            println!("Processing skin vertices for bone: {}", full_path);
+            println!("  Bone has {} skin vertices", bone.skin_verts.len());
+            println!("  Bone position: start={:?}, end={:?}", start, end);
+            
+            let skin_verts = bone.skin_verts.clone();
+            println!("PROCESSING: Bone '{}' has {} skin vertices", full_path, skin_verts.len());
+            for skin_vert in skin_verts {
+                // Calculate position of skin vertex using the bone's start and end
+                let position = skin_vert.calculate_position(*start, *end);
+                
+                // Use a rainbow color based on the bone depth
+                let color = get_rainbow_color(bone_depth, max_depth).0;
+                
+                // Add skin vertex to our collection
+                skin_vertex_positions.push((position, color));
+                println!("PROCESSING: Added skin vertex at {:?} for bone '{}'", position, full_path);
+            }
+        }
+    }
+
+    // Create the final MeshData with debug output
+    println!("*** SKIN VERTEX SUMMARY ***");
+    println!("Total skin vertices processed: {}", skin_vertex_positions.len());
+    for (i, (pos, _)) in skin_vertex_positions.iter().enumerate() {
+        println!("Vertex {}: position={:?}", i, pos);
+    }
+
     // Create mesh data
     let mut mesh_data = MeshData::default();
-    for (name, (start, end)) in positions {
-        let depth = get_bone_depth(&name);
-        let color = get_rainbow_color(depth, max_depth);
+    for (name, (start, end, color)) in &positions_with_colors {
         mesh_data.positions.insert(name.clone(), BonePosition {
-            start,
-            end,
-            color,
+            start: *start,
+            end: *end,
+            color: BoneColor(*color),
         });
-        color_map.insert(name.clone(), color);
+        color_map.insert(name.clone(), BoneColor(*color));
         
         // Store transforms
-        if let Some((transform, _)) = transforms.get(&name) {
+        if let Some((transform, _)) = transforms.get(name.as_str()) {
             mesh_data.transforms.insert(name.clone(), *transform);
         }
     }
+
+    mesh_data.skin_vertex_positions = skin_vertex_positions;
 
     // Set up camera
     commands.spawn((
@@ -573,7 +662,7 @@ fn update_camera(
 fn keyboard_input(
     keyboard: Res<ButtonInput<KeyCode>>,
     mut show_axes: ResMut<ShowAxes>,
-    mut commands: Commands,
+    _commands: Commands,
 ) {
     if keyboard.just_pressed(KeyCode::KeyG) {
         show_axes.0 = !show_axes.0;
@@ -617,6 +706,7 @@ fn mouse_motion(
 fn mouse_button_input(
     mouse_button_input: Res<ButtonInput<MouseButton>>,
     mut query: Query<&mut Transform, With<Camera>>,
+    _commands: Commands,
 ) {
     if mouse_button_input.just_pressed(MouseButton::Middle) {
         let mut transform = query.single_mut();
@@ -631,12 +721,62 @@ fn draw_bones(
     _settings: Res<VisualizationSettings>,
 ) {
     if let Some(mesh_data) = mesh_data {
+        // Debug print for draw_bones function
+        println!("*** DRAWING BONES AND SKIN VERTICES ***");
+        println!("Number of bones to draw: {}", mesh_data.positions.len());
+        println!("Number of skin vertices to draw: {}", mesh_data.skin_vertex_positions.len());
+        
+        // Draw bones
         for bone in mesh_data.positions.values() {
             // Draw bone using pre-transformed positions
             gizmos.line(
                 bone.start,
                 bone.end,
                 Color::rgb(bone.color.0[0], bone.color.0[1], bone.color.0[2])
+            );
+        }
+        
+        // Draw skin vertices as lines from the nearest bone point
+        println!("DRAWING: About to draw {} skin vertices", mesh_data.skin_vertex_positions.len());
+        for (i, (position, color)) in mesh_data.skin_vertex_positions.iter().enumerate() {
+            println!("DRAWING: Drawing skin vertex {} at position {:?}", i, position);
+            
+            // Find the closest bone
+            let mut closest_bone_start = Vec3::ZERO;
+            let mut closest_distance = f32::MAX;
+            
+            for bone in mesh_data.positions.values() {
+                // Calculate distance from vertex to the bone's start point
+                let distance = (*position - bone.start).length();
+                if distance < closest_distance {
+                    closest_distance = distance;
+                    closest_bone_start = bone.start;
+                }
+            }
+            
+            // Draw a thick line from the closest bone to the vertex position
+            gizmos.line(
+                closest_bone_start,
+                *position,
+                Color::RED // Bright red
+            );
+            
+            // Also draw a large cross at the vertex position
+            let cross_size = 0.2; // Size of the cross
+            gizmos.line(
+                *position - Vec3::new(cross_size, 0.0, 0.0),
+                *position + Vec3::new(cross_size, 0.0, 0.0),
+                Color::RED
+            );
+            gizmos.line(
+                *position - Vec3::new(0.0, cross_size, 0.0),
+                *position + Vec3::new(0.0, cross_size, 0.0),
+                Color::RED
+            );
+            gizmos.line(
+                *position - Vec3::new(0.0, 0.0, cross_size),
+                *position + Vec3::new(0.0, 0.0, cross_size),
+                Color::RED
             );
         }
     }

@@ -5,9 +5,21 @@
   orientation = 0
   slope = -90
   rotation = 0
+  skin_verts = [
+    { segment_length = 0.5, distance = 0.3, rotation = 0 },
+    { segment_length = 0.5, distance = 0.3, rotation = 90 },
+    { segment_length = 0.5, distance = 0.3, rotation = 180 },
+    { segment_length = 0.5, distance = 0.3, rotation = 270 }
+  ]
 
 [body.lower_spine.middle_spine]
   length = 0.18
+  skin_verts = [
+    { segment_length = 0.2, distance = 0.3, rotation = 45 },
+    { segment_length = 0.4, distance = 0.3, rotation = 45 },
+    { segment_length = 0.6, distance = 0.3, rotation = 45 },
+    { segment_length = 0.8, distance = 0.3, rotation = 45 }
+  ]
 
   [body.lower_spine.middle_spine.upper_spine]
   length = 0.15
@@ -17,6 +29,11 @@
   orientation = 100
   slope = 20
   rotation = 0
+  skin_verts = [
+    { segment_length = 0.25, distance = 0.3, rotation = 0 },
+    { segment_length = 0.5, distance = 0.3, rotation = 0 },
+    { segment_length = 0.75, distance = 0.3, rotation = 0 }
+  ]
 
 [body.lower_spine.middle_spine.upper_spine.left_upper_arm.left_lower_arm]
   length = 0.3
@@ -33,7 +50,7 @@
 [body.lower_spine.middle_spine.upper_spine.right_upper_arm.right_lower_arm]
   length = 0.3
 
-[body.lower_spine.middle_spine.upper_spine.upper_arm.right_lower_arm.right_hand]
+[body.lower_spine.middle_spine.upper_spine.right_upper_arm.right_lower_arm.right_hand]
   length = 0.1
 
 
@@ -42,7 +59,12 @@
   
   [body.lower_spine.middle_spine.upper_spine.neck.head]
   length = 0.25
-  
+  skin_verts = [
+    { segment_length = 0.5, distance = 0.3, rotation = 0 },
+    { segment_length = 0.5, distance = 0.3, rotation = 90 },
+    { segment_length = 0.5, distance = 0.3, rotation = 180 },
+    { segment_length = 0.5, distance = 0.3, rotation = 270 }
+  ]
 
   [body.left_pelvis]
   length = 0.3
@@ -61,6 +83,12 @@
   length = 0.3
   slope = -45
   orientation = -90
+  skin_verts = [
+    { segment_length = 0.5, distance = 0.3, rotation = 0 },
+    { segment_length = 0.5, distance = 0.3, rotation = 90 },
+    { segment_length = 0.5, distance = 0.3, rotation = 180 },
+    { segment_length = 0.5, distance = 0.3, rotation = 270 }
+  ]
 
   [body.right_pelvis]
   length = 0.3
@@ -78,3 +106,9 @@
   length = 0.3
   slope = -45
   orientation = -90
+  skin_verts = [
+    { segment_length = 0.5, distance = 0.3, rotation = 0 },
+    { segment_length = 0.5, distance = 0.3, rotation = 90 },
+    { segment_length = 0.5, distance = 0.3, rotation = 180 },
+    { segment_length = 0.5, distance = 0.3, rotation = 270 }
+  ]

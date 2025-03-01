@@ -25,6 +25,9 @@ pub struct Bone {
     #[serde(default)]
     pub rotation: Option<f32>,
     
+    #[serde(default)]
+    pub skin_verts: Vec<SkinVert>,
+    
     // Resolved values after inheritance
     #[serde(skip)]
     pub resolved_orientation: f32,
@@ -32,6 +35,83 @@ pub struct Bone {
     pub resolved_slope: f32,
     #[serde(skip)]
     pub resolved_rotation: f32,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize)]
+pub struct SkinVert {
+    #[serde(default)]
+    pub segment_length: f32,  // Position along the bone
+    #[serde(default)]
+    pub distance: f32,        // Distance from the bone
+    #[serde(default)]
+    pub rotation: f32,  // Rotation around the bone in degrees
+    #[serde(default = "default_weight")]
+    pub weight: f32,          // Weight of influence
+}
+
+impl Default for SkinVert {
+    fn default() -> Self {
+        Self {
+            segment_length: 0.5,  // Default to middle of the bone
+            distance: 0.0,        // Default to on the bone
+            rotation: 0.0,        // Default to 0 degrees
+            weight: 1.0,          // Default to full weight
+        }
+    }
+}
+
+impl SkinVert {
+    /// Calculate the position of this skin vertex relative to the bone
+    pub fn calculate_position(&self, bone_start: Vec3, bone_end: Vec3) -> Vec3 {
+        // Calculate the direction of the bone
+        let bone_direction = (bone_end - bone_start).normalize();
+        let bone_length = (bone_end - bone_start).length();
+        
+        // Find position along the bone based on segment_length
+        let segment_position = bone_start + bone_direction * bone_length * self.segment_length;
+        
+        // If distance is very small, return the position on the bone
+        if self.distance < 0.001 {
+            return segment_position;
+        }
+        
+        // Calculate perpendicular vectors to create a coordinate system around the bone
+        // First perpendicular vector - prefer using the global Y-axis for stability if possible
+        let perp1 = if bone_direction.dot(Vec3::Y).abs() < 0.99 {
+            // If bone is not nearly parallel to Y, use Y to find perpendicular
+            bone_direction.cross(Vec3::Y).normalize()
+        } else {
+            // If bone is nearly parallel to Y, use X to find perpendicular
+            bone_direction.cross(Vec3::X).normalize()
+        };
+        
+        // Second perpendicular vector to complete the orthogonal basis
+        let perp2 = bone_direction.cross(perp1).normalize();
+        
+        // Calculate rotation around the bone (in radians)
+        let rotation_rad = self.rotation.to_radians();
+        
+        // Apply distance and rotation to get the final position
+        let offset = perp1 * self.distance * rotation_rad.cos() + 
+                     perp2 * self.distance * rotation_rad.sin();
+        
+        let final_pos = segment_position + offset;
+        
+        eprintln!("Skin vert calculation: segment={}, distance={}, rotation={}°", 
+                  self.segment_length, self.distance, self.rotation);
+        eprintln!("  bone_start={:?}, bone_end={:?}, bone_length={}", 
+                 bone_start, bone_end, bone_length);
+        eprintln!("  segment_position={:?}", segment_position);
+        eprintln!("  perp1={:?}, perp2={:?}", perp1, perp2);
+        eprintln!("  rotation_rad={}, offset={:?}", rotation_rad, offset);
+        eprintln!("  final_position={:?}", final_pos);
+        
+        final_pos
+    }
+}
+
+fn default_weight() -> f32 {
+    1.0
 }
 
 #[derive(Debug, Clone)]
@@ -106,6 +186,18 @@ impl Model {
         let config: toml::Value = content.parse()?;
         eprintln!("Parsed TOML:\n{:#?}", config);
         
+        eprintln!("!!! CHECKING FOR SKIN VERTS IN TOML !!!");
+        if let Some(body) = config.get("body").and_then(|v| v.as_table()) {
+            if let Some(lower_spine) = body.get("lower_spine").and_then(|v| v.as_table()) {
+                eprintln!("Found lower_spine: {:?}", lower_spine.keys().collect::<Vec<_>>());
+                if let Some(skin_verts) = lower_spine.get("skin_verts") {
+                    eprintln!("Found lower_spine.skin_verts: {:?}", skin_verts);
+                } else {
+                    eprintln!("No skin_verts in lower_spine");
+                }
+            }
+        }
+        
         let mut bones = HashMap::new();
 
         fn find_parent_bone<'a>(path: &str, bones: &'a HashMap<String, Group>) -> Option<&'a Bone> {
@@ -116,6 +208,36 @@ impl Model {
                 }
             }
             None
+        }
+
+        fn parse_skin_verts(table: &toml::value::Table) -> Vec<SkinVert> {
+            eprintln!("SKINVERT: Parsing skin_verts for bone table: {:?}", table.get("name"));
+            if let Some(skin_verts) = table.get("skin_verts").and_then(|v| v.as_array()) {
+                eprintln!("SKINVERT: Found {} skin vertices in TOML", skin_verts.len());
+                let result: Vec<SkinVert> = skin_verts.iter().map(|v| {
+                    let mut skin_vert = SkinVert::default();
+                    if let Some(segment_length) = v.get("segment_length").and_then(|v| v.as_float()) {
+                        skin_vert.segment_length = segment_length as f32;
+                    }
+                    if let Some(distance) = v.get("distance").and_then(|v| v.as_float()) {
+                        skin_vert.distance = distance as f32;
+                    }
+                    if let Some(rotation) = v.get("rotation").and_then(|v| v.as_float()) {
+                        skin_vert.rotation = rotation as f32;
+                    }
+                    if let Some(weight) = v.get("weight").and_then(|v| v.as_float()) {
+                        skin_vert.weight = weight as f32;
+                    }
+                    eprintln!("SKINVERT: Created skin vertex: segment={}, distance={}, rotation={}, weight={}",
+                              skin_vert.segment_length, skin_vert.distance, skin_vert.rotation, skin_vert.weight);
+                    skin_vert
+                }).collect();
+                eprintln!("SKINVERT: Returning {} processed skin vertices", result.len());
+                result
+            } else {
+                eprintln!("SKINVERT: No skin_verts found in table");
+                Vec::new()
+            }
         }
 
         fn collect_bones(
@@ -154,6 +276,7 @@ impl Model {
                     rotation: table.get("rotation")
                         .and_then(|v| v.as_float().or_else(|| v.as_integer().map(|i| i as f64)))
                         .map(|v| v as f32),
+                    skin_verts: parse_skin_verts(table),
                     resolved_orientation: 0.0,
                     resolved_slope: 0.0,
                     resolved_rotation: 0.0,
@@ -175,7 +298,7 @@ impl Model {
             for (key, value) in table {
                 if let Some(nested_table) = value.as_table() {
                     // Skip keys that are bone properties
-                    if key == "length" || key == "orientation" || key == "slope" || key == "rotation" {
+                    if key == "length" || key == "orientation" || key == "slope" || key == "rotation" || key == "skin_verts" {
                         continue;
                     }
                     
