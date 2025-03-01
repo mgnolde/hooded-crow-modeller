@@ -215,35 +215,68 @@ impl Model {
 
         fn parse_skin_verts(table: &toml::value::Table) -> Vec<SkinVert> {
             eprintln!("SKINVERT: Parsing skin_verts for bone table: {:?}", table.get("name"));
-            if let Some(skin_verts) = table.get("skin_verts").and_then(|v| v.as_array()) {
-                eprintln!("SKINVERT: Found {} skin vertices in TOML", skin_verts.len());
-                let result: Vec<SkinVert> = skin_verts.iter().map(|v| {
-                    let mut skin_vert = SkinVert::default();
-                    if let Some(segment_length) = v.get("segment_length").and_then(|v| v.as_float()) {
-                        skin_vert.segment_length = segment_length as f32;
-                    }
-                    if let Some(distance) = v.get("distance").and_then(|v| v.as_float()) {
-                        skin_vert.distance = distance as f32;
-                    }
-                    if let Some(rotation) = v.get("rotation").and_then(|v| v.as_float()) {
-                        skin_vert.rotation = rotation as f32;
-                    }
-                    if let Some(weight) = v.get("weight").and_then(|v| v.as_float()) {
-                        skin_vert.weight = weight as f32;
-                    }
-                    if let Some(id) = v.get("id").and_then(|v| v.as_str()) {
+            
+            // Check if skin_verts is present
+            if let Some(skin_verts_value) = table.get("skin_verts") {
+                // Array format: skin_verts = [{ segment_length = 0.2, ... }]
+                if let Some(skin_verts_array) = skin_verts_value.as_array() {
+                    eprintln!("SKINVERT: Found {} skin vertices in TOML array format", skin_verts_array.len());
+                    let result: Vec<SkinVert> = skin_verts_array.iter().map(|v| {
+                        let mut skin_vert = SkinVert::default();
+                        if let Some(segment_length) = v.get("segment_length").and_then(|v| v.as_float()) {
+                            skin_vert.segment_length = segment_length as f32;
+                        }
+                        if let Some(distance) = v.get("distance").and_then(|v| v.as_float()) {
+                            skin_vert.distance = distance as f32;
+                        }
+                        if let Some(rotation) = v.get("rotation").and_then(|v| v.as_float()) {
+                            skin_vert.rotation = rotation as f32;
+                        }
+                        if let Some(weight) = v.get("weight").and_then(|v| v.as_float()) {
+                            skin_vert.weight = weight as f32;
+                        }
+                        if let Some(id) = v.get("id").and_then(|v| v.as_str()) {
+                            skin_vert.id = Some(id.to_string());
+                        }
+                        eprintln!("SKINVERT: Created skin vertex: segment={}, distance={}, rotation={}, weight={}, id={:?}",
+                                skin_vert.segment_length, skin_vert.distance, skin_vert.rotation, skin_vert.weight, skin_vert.id);
+                        skin_vert
+                    }).collect();
+                    eprintln!("SKINVERT: Returning {} processed skin vertices from array format", result.len());
+                    return result;
+                }
+                
+                // Table format: skin_verts = { "id1" = { segment_length = 0.2, ... } }
+                if let Some(skin_verts_table) = skin_verts_value.as_table() {
+                    eprintln!("SKINVERT: Found {} skin vertices in TOML table format", skin_verts_table.len());
+                    let result: Vec<SkinVert> = skin_verts_table.iter().map(|(id, props)| {
+                        let mut skin_vert = SkinVert::default();
                         skin_vert.id = Some(id.to_string());
-                    }
-                    eprintln!("SKINVERT: Created skin vertex: segment={}, distance={}, rotation={}, weight={}, id={:?}",
-                              skin_vert.segment_length, skin_vert.distance, skin_vert.rotation, skin_vert.weight, skin_vert.id);
-                    skin_vert
-                }).collect();
-                eprintln!("SKINVERT: Returning {} processed skin vertices", result.len());
-                result
-            } else {
-                eprintln!("SKINVERT: No skin_verts found in table");
-                Vec::new()
+                        
+                        if let Some(segment_length) = props.get("segment_length").and_then(|v| v.as_float()) {
+                            skin_vert.segment_length = segment_length as f32;
+                        }
+                        if let Some(distance) = props.get("distance").and_then(|v| v.as_float()) {
+                            skin_vert.distance = distance as f32;
+                        }
+                        if let Some(rotation) = props.get("rotation").and_then(|v| v.as_float()) {
+                            skin_vert.rotation = rotation as f32;
+                        }
+                        if let Some(weight) = props.get("weight").and_then(|v| v.as_float()) {
+                            skin_vert.weight = weight as f32;
+                        }
+                        
+                        eprintln!("SKINVERT: Created skin vertex: segment={}, distance={}, rotation={}, weight={}, id={:?}",
+                               skin_vert.segment_length, skin_vert.distance, skin_vert.rotation, skin_vert.weight, skin_vert.id);
+                        skin_vert
+                    }).collect();
+                    eprintln!("SKINVERT: Returning {} processed skin vertices from table format", result.len());
+                    return result;
+                }
             }
+            
+            eprintln!("SKINVERT: No valid skin_verts found in table");
+            Vec::new()
         }
 
         fn collect_bones(
