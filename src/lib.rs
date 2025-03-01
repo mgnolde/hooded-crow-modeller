@@ -18,9 +18,20 @@ pub struct Group {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Bone {
     pub length: f32,
-    pub orientation: f32,
-    pub slope: f32,
-    pub rotation: f32,
+    #[serde(default)]
+    pub orientation: Option<f32>,
+    #[serde(default)]
+    pub slope: Option<f32>,
+    #[serde(default)]
+    pub rotation: Option<f32>,
+    
+    // Resolved values after inheritance
+    #[serde(skip)]
+    pub resolved_orientation: f32,
+    #[serde(skip)]
+    pub resolved_slope: f32,
+    #[serde(skip)]
+    pub resolved_rotation: f32,
 }
 
 #[derive(Debug, Clone)]
@@ -43,6 +54,27 @@ impl Default for BonePosition {
 impl Bone {
     pub fn has_parent(&self) -> bool {
         false
+    }
+    
+    pub fn resolve_values(&mut self, parent: Option<&Bone>) {
+        // If no parent or value is explicitly specified, use default
+        self.resolved_orientation = match (self.orientation, parent) {
+            (Some(val), _) => val,                                 // Use explicitly set value
+            (None, Some(parent)) => parent.resolved_orientation,   // Inherit from parent
+            (None, None) => 0.0,                                  // Default value
+        };
+        
+        self.resolved_slope = match (self.slope, parent) {
+            (Some(val), _) => val,
+            (None, Some(parent)) => parent.resolved_slope,
+            (None, None) => 0.0,
+        };
+        
+        self.resolved_rotation = match (self.rotation, parent) {
+            (Some(val), _) => val,
+            (None, Some(parent)) => parent.resolved_rotation,
+            (None, None) => 0.0,
+        };
     }
 }
 
@@ -76,6 +108,16 @@ impl Model {
         
         let mut bones = HashMap::new();
 
+        fn find_parent_bone<'a>(path: &str, bones: &'a HashMap<String, Group>) -> Option<&'a Bone> {
+            // Iterate through all groups to find the bone with this path
+            for (_group_path, group) in bones {
+                if let Some(bone) = group.bones.get(path) {
+                    return Some(bone);
+                }
+            }
+            None
+        }
+
         fn collect_bones(
             table: &toml::value::Table, 
             current_path: &str, 
@@ -92,22 +134,40 @@ impl Model {
             
             // If this table has bone properties, add the bone to the current group
             if table.contains_key("length") {
-                let bone = Bone {
+                // Find parent bone to potentially inherit properties
+                let parent_bone = if current_path.contains('.') {
+                    let parent_path = current_path.rsplit_once('.').unwrap().0;
+                    find_parent_bone(parent_path, bones)
+                } else {
+                    None
+                };
+                
+                // Extract bone properties with inheritance
+                let mut bone = Bone {
                     length: table.get("length").and_then(|v| v.as_float()).unwrap_or(1.0) as f32,
                     orientation: table.get("orientation")
                         .and_then(|v| v.as_float().or_else(|| v.as_integer().map(|i| i as f64)))
-                        .unwrap_or(0.0) as f32,
+                        .map(|v| v as f32),
                     slope: table.get("slope")
                         .and_then(|v| v.as_float().or_else(|| v.as_integer().map(|i| i as f64)))
-                        .unwrap_or(0.0) as f32,
+                        .map(|v| v as f32),
                     rotation: table.get("rotation")
                         .and_then(|v| v.as_float().or_else(|| v.as_integer().map(|i| i as f64)))
-                        .unwrap_or(0.0) as f32,
+                        .map(|v| v as f32),
+                    resolved_orientation: 0.0,
+                    resolved_slope: 0.0,
+                    resolved_rotation: 0.0,
                 };
                 
+                // Resolve inherited values
+                bone.resolve_values(parent_bone);
+                
                 eprintln!("Created bone: {:?}", bone);
-                eprintln!("Bone properties: length={}, orientation={}, slope={}, rotation={}", 
+                eprintln!("Bone properties: length={}, raw orientation={:?}, raw slope={:?}, raw rotation={:?}", 
                          bone.length, bone.orientation, bone.slope, bone.rotation);
+                eprintln!("Resolved values: orientation={}, slope={}, rotation={}", 
+                         bone.resolved_orientation, bone.resolved_slope, bone.resolved_rotation);
+                
                 current_group.bones.insert(current_path.to_string(), bone);
             }
             
@@ -167,7 +227,7 @@ impl Model {
                 eprintln!("Group at {}: {} bones, {} subgroups", 
                          path, group.bones.len(), group.subgroups.len());
                 for (bone_name, bone) in &group.bones {
-                    eprintln!("  Bone: {} -> length={}, orientation={}, slope={}, rotation={}", 
+                    eprintln!("  Bone: {} -> length={}, orientation={:?}, slope={:?}, rotation={:?}", 
                              bone_name, bone.length, bone.orientation, bone.slope, bone.rotation);
                 }
                 for (subname, subgroup) in &group.subgroups {
@@ -191,7 +251,7 @@ impl Model {
             
             // Add bones from current group
             for (name, bone) in &group.bones {
-                eprintln!("Adding bone {} -> length={}, orientation={}, slope={}, rotation={}", 
+                eprintln!("Adding bone {} -> length={}, orientation={:?}, slope={:?}, rotation={:?}", 
                          name, bone.length, bone.orientation, bone.slope, bone.rotation);
                 bones.insert(name.clone(), bone.clone());
             }
@@ -308,13 +368,15 @@ impl Model {
             
             eprintln!("\nProcessing bone: {}", name);
             eprintln!("Level: {}, Color: {:?}", level, color);
-            eprintln!("Properties: length={}, orientation={}, slope={}, rotation={}", 
+            eprintln!("Properties: length={}, raw orientation={:?}, raw slope={:?}, raw rotation={:?}", 
                      bone.length, bone.orientation, bone.slope, bone.rotation);
+            eprintln!("Resolved values: orientation={}, slope={}, rotation={}", 
+                     bone.resolved_orientation, bone.resolved_slope, bone.resolved_rotation);
             
             let start = Vec3::ZERO;
             
             // Get base direction from orientation and slope
-            let direction = calculate_direction(bone.orientation, bone.slope);
+            let direction = calculate_direction(bone.resolved_orientation, bone.resolved_slope);
             eprintln!("Final direction vector: {:?}", direction);
             
             let end = start + (direction * bone.length);

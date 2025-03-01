@@ -119,6 +119,7 @@ fn hash_content(content: &str) -> u64 {
 
 fn calculate_transform(orientation: f32, slope: f32, rotation: f32) -> Mat4 {
     // Convert angles to radians
+    // This is now using the resolved orientation value from the bone
     let orientation_rad = orientation.to_radians();
     let slope_rad = slope.to_radians();
     let rotation_rad = rotation.to_radians();
@@ -170,7 +171,7 @@ fn process_bone_group(
         };
 
         // Calculate bone's local transform
-        let local_transform = calculate_transform(bone.orientation, bone.slope, bone.rotation);
+        let local_transform = calculate_transform(bone.resolved_orientation, bone.resolved_slope, bone.resolved_rotation);
         
         // Combine with parent transform
         let world_transform = parent_transform * local_transform;
@@ -314,10 +315,28 @@ fn process_bones_in_order(
             if let Some(group) = find_group(model, &path) {
                 println!("Processing bone at depth {}: {} (parent: {})", depth, path, parent_path);
                 
+                // Get parent transform if available, otherwise use identity
+                let parent_transform = if !parent_path.is_empty() {
+                    transforms.get(&parent_path)
+                        .map(|(transform, _)| *transform)
+                        .unwrap_or(Mat4::IDENTITY)
+                } else {
+                    Mat4::IDENTITY
+                };
+                
+                // Get parent end position if available
+                let parent_end = if !parent_path.is_empty() {
+                    transforms.get(&parent_path)
+                        .map(|(_, end)| *end)
+                        .unwrap_or(Vec3::ZERO)
+                } else {
+                    Vec3::ZERO
+                };
+                
                 process_bone_group(
                     group,
-                    Mat4::IDENTITY,
-                    Vec3::ZERO,
+                    parent_transform, // Use parent transform instead of identity
+                    parent_end,
                     &parent_path,
                     transforms,
                     positions,
