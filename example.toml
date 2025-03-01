@@ -1,15 +1,48 @@
 [body]
 
   [body.lower_spine]
-  length = 1.0
+  length = 0.20
   orientation = 0
   slope = -90
   rotation = 0
 
-  [body.lower_spine.upper_spine]
-  length = 1.0
-  orientation = 180
-  # Inherits slope and rotation from parent
+[body.lower_spine.middle_spine]
+  length = 0.18
+
+  [body.lower_spine.middle_spine.upper_spine]
+  length = 0.15
+
+  [body.lower_spine.middle_spine.upper_spine.left_upper_arm]
+  length = 0.3
+  orientation = 100
+  slope = 20
+  rotation = 0
+
+[body.lower_spine.middle_spine.upper_spine.left_upper_arm.left_lower_arm]
+  length = 0.3
+
+[body.lower_spine.middle_spine.upper_spine.left_upper_arm.left_lower_arm.left_hand]
+  length = 0.1
+
+[body.lower_spine.middle_spine.upper_spine.right_upper_arm]
+  length = 0.3
+  orientation = -100
+  slope = 20
+  rotation = 0
+
+[body.lower_spine.middle_spine.upper_spine.right_upper_arm.right_lower_arm]
+  length = 0.3
+
+[body.lower_spine.middle_spine.upper_spine.upper_arm.right_lower_arm.right_hand]
+  length = 0.1
+
+
+  [body.lower_spine.middle_spine.upper_spine.neck]
+  length = 0.12
+  
+  [body.lower_spine.middle_spine.upper_spine.neck.head]
+  length = 0.25
+  
 
   [body.left_pelvis]
   length = 0.3
@@ -19,17 +52,15 @@
 
 [body.left_pelvis.left_upper_leg]
   length = 0.5
-  # Inherits orientation, slope, and rotation from parent
 
   [body.left_pelvis.left_upper_leg.left_lower_leg]
   length = 0.5
   orientation = 0
-  # Inherits slope and rotation from parent
 
 [body.left_pelvis.left_upper_leg.left_lower_leg.left_foot]
   length = 0.3
-  # Inherits all values from parent
-
+  slope = -45
+  orientation = -90
 
   [body.right_pelvis]
   length = 0.3
@@ -39,12 +70,11 @@
 
   [body.right_pelvis.right_upper_leg]
   length = 0.5
-  # Inherits from parent
 
   [body.right_pelvis.right_upper_leg.right_lower_leg]
   length = 0.5
-  # Inherits from parent
 
 [body.right_pelvis.right_upper_leg.right_lower_leg.right_foot]
   length = 0.3
-  # Inherits from parent
+  slope = -45
+  orientation = -90
