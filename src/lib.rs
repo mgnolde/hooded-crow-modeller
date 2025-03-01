@@ -37,7 +37,7 @@ pub struct Bone {
     pub resolved_rotation: f32,
 }
 
-#[derive(Debug, Clone, Copy, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct SkinVert {
     #[serde(default)]
     pub segment_length: f32,  // Position along the bone
@@ -47,6 +47,8 @@ pub struct SkinVert {
     pub rotation: f32,  // Rotation around the bone in degrees
     #[serde(default = "default_weight")]
     pub weight: f32,          // Weight of influence
+    #[serde(default)]
+    pub id: Option<String>,   // Optional identifier for the skin vertex
 }
 
 impl Default for SkinVert {
@@ -56,6 +58,7 @@ impl Default for SkinVert {
             distance: 0.0,        // Default to on the bone
             rotation: 0.0,        // Default to 0 degrees
             weight: 1.0,          // Default to full weight
+            id: None,             // Default to no id
         }
     }
 }
@@ -110,27 +113,6 @@ impl SkinVert {
     }
 }
 
-fn default_weight() -> f32 {
-    1.0
-}
-
-#[derive(Debug, Clone)]
-pub struct BonePosition {
-    pub start: Vec3,
-    pub end: Vec3,
-    pub color: [f32; 3],
-}
-
-impl Default for BonePosition {
-    fn default() -> Self {
-        Self {
-            start: Vec3::ZERO,
-            end: Vec3::ZERO,
-            color: [1.0, 1.0, 1.0],  // Default white color
-        }
-    }
-}
-
 impl Bone {
     pub fn has_parent(&self) -> bool {
         false
@@ -155,6 +137,27 @@ impl Bone {
             (None, Some(parent)) => parent.resolved_rotation,
             (None, None) => 0.0,
         };
+    }
+}
+
+fn default_weight() -> f32 {
+    1.0
+}
+
+#[derive(Debug, Clone)]
+pub struct BonePosition {
+    pub start: Vec3,
+    pub end: Vec3,
+    pub color: [f32; 3],
+}
+
+impl Default for BonePosition {
+    fn default() -> Self {
+        Self {
+            start: Vec3::ZERO,
+            end: Vec3::ZERO,
+            color: [1.0, 1.0, 1.0],  // Default white color
+        }
     }
 }
 
@@ -228,8 +231,11 @@ impl Model {
                     if let Some(weight) = v.get("weight").and_then(|v| v.as_float()) {
                         skin_vert.weight = weight as f32;
                     }
-                    eprintln!("SKINVERT: Created skin vertex: segment={}, distance={}, rotation={}, weight={}",
-                              skin_vert.segment_length, skin_vert.distance, skin_vert.rotation, skin_vert.weight);
+                    if let Some(id) = v.get("id").and_then(|v| v.as_str()) {
+                        skin_vert.id = Some(id.to_string());
+                    }
+                    eprintln!("SKINVERT: Created skin vertex: segment={}, distance={}, rotation={}, weight={}, id={:?}",
+                              skin_vert.segment_length, skin_vert.distance, skin_vert.rotation, skin_vert.weight, skin_vert.id);
                     skin_vert
                 }).collect();
                 eprintln!("SKINVERT: Returning {} processed skin vertices", result.len());

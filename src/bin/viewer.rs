@@ -736,7 +736,7 @@ fn draw_bones(
             );
         }
         
-        // Draw skin vertices as lines from the nearest bone point
+        // Draw skin vertices as spheres
         println!("DRAWING: About to draw {} skin vertices", mesh_data.skin_vertex_positions.len());
         for (i, (position, color)) in mesh_data.skin_vertex_positions.iter().enumerate() {
             println!("DRAWING: Drawing skin vertex {} at position {:?}", i, position);
@@ -761,22 +761,13 @@ fn draw_bones(
                 Color::RED // Bright red
             );
             
-            // Also draw a large cross at the vertex position
-            let cross_size = 0.2; // Size of the cross
-            gizmos.line(
-                *position - Vec3::new(cross_size, 0.0, 0.0),
-                *position + Vec3::new(cross_size, 0.0, 0.0),
-                Color::RED
-            );
-            gizmos.line(
-                *position - Vec3::new(0.0, cross_size, 0.0),
-                *position + Vec3::new(0.0, cross_size, 0.0),
-                Color::RED
-            );
-            gizmos.line(
-                *position - Vec3::new(0.0, 0.0, cross_size),
-                *position + Vec3::new(0.0, 0.0, cross_size),
-                Color::RED
+            // Draw a sphere at the vertex position
+            let sphere_radius = 0.05; // Size of the sphere
+            gizmos.sphere(
+                *position,
+                Quat::IDENTITY,
+                sphere_radius,
+                Color::rgb(color[0], color[1], color[2])
             );
         }
     }
