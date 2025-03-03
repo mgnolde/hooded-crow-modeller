@@ -5,7 +5,10 @@ use bevy::{
         mouse::{MouseMotion, MouseWheel, MouseButton},
         keyboard::KeyCode,
     },
-    gizmos::gizmos::Gizmos,
+    pbr::{AlphaMode, StandardMaterial},
+    render::mesh::{Indices, PrimitiveTopology},
+    render::render_asset::RenderAssetUsages,
+    window::PrimaryWindow,
 };
 use std::{
     path::{Path, PathBuf},
@@ -113,6 +116,19 @@ struct LastModified(SystemTime);
 #[derive(Event)]
 struct FileChangedEvent {
     model: Model,
+}
+
+#[derive(Resource)]
+struct TriangleMeshHandles {
+    handles: Vec<Entity>,
+}
+
+impl Default for TriangleMeshHandles {
+    fn default() -> Self {
+        Self {
+            handles: Vec::new(),
+        }
+    }
 }
 
 fn hash_content(content: &str) -> u64 {
@@ -509,6 +525,27 @@ fn handle_file_changes(
             CameraController::default(),
         ));
 
+        // Add ambient light
+        commands.insert_resource(AmbientLight {
+            color: Color::WHITE,
+            brightness: 0.5,
+        });
+        
+        // Add a directional light to aid in visibility
+        commands.spawn(DirectionalLightBundle {
+            directional_light: DirectionalLight {
+                illuminance: 10000.0,
+                shadows_enabled: true,
+                ..default()
+            },
+            transform: Transform {
+                translation: Vec3::new(0.0, 2.0, 0.0),
+                rotation: Quat::from_rotation_x(-std::f32::consts::FRAC_PI_4),
+                ..default()
+            },
+            ..default()
+        });
+
         // Insert resources
         commands.insert_resource(mesh_data);
         commands.insert_resource(ShowAxes(true));
@@ -696,6 +733,27 @@ fn setup(
         CameraController::default(),
     ));
 
+    // Add ambient light
+    commands.insert_resource(AmbientLight {
+        color: Color::WHITE,
+        brightness: 0.5,
+    });
+    
+    // Add a directional light to aid in visibility
+    commands.spawn(DirectionalLightBundle {
+        directional_light: DirectionalLight {
+            illuminance: 10000.0,
+            shadows_enabled: true,
+            ..default()
+        },
+        transform: Transform {
+            translation: Vec3::new(0.0, 2.0, 0.0),
+            rotation: Quat::from_rotation_x(-std::f32::consts::FRAC_PI_4),
+            ..default()
+        },
+        ..default()
+    });
+
     // Insert resources
     commands.insert_resource(mesh_data);
     commands.insert_resource(ShowAxes(true));
@@ -829,7 +887,7 @@ fn mouse_motion(
                 let y_rotation = Quat::from_rotation_y(-delta_x);
                 let right: Vec3 = transform.right().into();
                 let x_rotation = Quat::from_axis_angle(right, -delta_y);
-                
+
                 // Apply rotations around origin
                 let rotation = y_rotation * x_rotation;
                 transform.rotate_around(origin, rotation);
@@ -851,6 +909,80 @@ fn mouse_button_input(
         let mut transform = query.single_mut();
         transform.translation = Vec3::new(0.0, 0.0, 5.0);
         transform.look_at(Vec3::ZERO, Vec3::Y);
+    }
+}
+
+fn update_triangle_meshes(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    mesh_data: Option<Res<MeshData>>,
+    settings: Res<VisualizationSettings>,
+    mut triangle_handles: ResMut<TriangleMeshHandles>,
+) {
+    // Clear previous triangle meshes
+    for entity in triangle_handles.handles.drain(..) {
+        commands.entity(entity).despawn();
+    }
+
+    // If we don't have mesh data or triangles aren't visible, return
+    if mesh_data.is_none() || !settings.show_triangles {
+        return;
+    }
+
+    if let Some(mesh_data) = mesh_data {
+        println!("UPDATING: Creating {} triangle meshes", mesh_data.triangles.len());
+
+        // Create a semi-transparent green material
+        let triangle_material = materials.add(StandardMaterial {
+            base_color: Color::rgba(0.2, 0.8, 0.2, 0.5),
+            alpha_mode: AlphaMode::Blend,
+            double_sided: true,  // Make sure both sides are visible
+            cull_mode: None,     // Disable face culling
+            unlit: true,         // Make it unlit so it's always visible regardless of lighting
+            ..default()
+        });
+
+        // Create a mesh for each triangle
+        for (name, vertices) in &mesh_data.triangles {
+            println!("MESH: Creating triangle mesh '{}'", name);
+            
+            // Create a mesh for this triangle
+            let mut mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default());
+            
+            // Set vertex positions (just the 3 vertices)
+            mesh.insert_attribute(
+                Mesh::ATTRIBUTE_POSITION, 
+                vec![vertices[0], vertices[1], vertices[2]]
+            );
+            
+            // Set normals (all facing the same direction for simplicity)
+            let normal = (vertices[1] - vertices[0]).cross(vertices[2] - vertices[0]).normalize();
+            mesh.insert_attribute(
+                Mesh::ATTRIBUTE_NORMAL, 
+                vec![normal, normal, normal]
+            );
+            
+            // Set UV coordinates (not really used, but required)
+            mesh.insert_attribute(
+                Mesh::ATTRIBUTE_UV_0, 
+                vec![[0.0, 0.0], [1.0, 0.0], [0.5, 1.0]]
+            );
+            
+            // Set indices
+            mesh.insert_indices(Indices::U32(vec![0, 1, 2]));
+            
+            // Spawn the mesh entity
+            let mesh_handle = meshes.add(mesh);
+            let entity = commands.spawn(PbrBundle {
+                mesh: mesh_handle,
+                material: triangle_material.clone(),
+                ..default()
+            }).id();
+            
+            // Store the entity handle for cleanup later
+            triangle_handles.handles.push(entity);
+        }
     }
 }
 
@@ -906,19 +1038,15 @@ fn draw_triangles(
         // Debug print details about triangles
         println!("DRAWING: Triangle positions map has {} triangles", mesh_data.triangles.len());
         
-        // Draw each triangle
+        // Draw triangle outlines only - the mesh system handles the filling
         for (name, vertices) in &mesh_data.triangles {
-            println!("DRAWING: Drawing triangle '{}' with vertices: {:?}, {:?}, {:?}",
-                name, vertices[0], vertices[1], vertices[2]);
-                
-            // Draw the triangle as three lines
-            gizmos.line(vertices[0], vertices[1], Color::rgb(0.2, 0.8, 0.2));
-            gizmos.line(vertices[1], vertices[2], Color::rgb(0.2, 0.8, 0.2));
-            gizmos.line(vertices[2], vertices[0], Color::rgb(0.2, 0.8, 0.2));
+            println!("DRAWING: Drawing triangle outline '{}'", name);
             
-            // Calculate triangle center for label
-            let center = (vertices[0] + vertices[1] + vertices[2]) / 3.0;
-            gizmos.sphere(center, Quat::IDENTITY, 0.02, Color::WHITE);
+            // Draw the triangle outline only
+            let outline_color = Color::rgb(0.2, 0.8, 0.2);
+            gizmos.line(vertices[0], vertices[1], outline_color);
+            gizmos.line(vertices[1], vertices[2], outline_color);
+            gizmos.line(vertices[2], vertices[0], outline_color);
         }
     }
 }
@@ -1371,13 +1499,14 @@ fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
         .add_plugins(EguiPlugin)
-        .add_event::<FileChangedEvent>()  // Register the event
         .insert_resource(MeshFile(mesh_file))
         .insert_resource(if let Some(path) = export_path {
             ExportPath(path)
         } else {
             ExportPath(PathBuf::from("output.glb"))
         })
+        .add_event::<FileChangedEvent>()  // Register the event
+        .insert_resource(TriangleMeshHandles::default())
         .add_systems(Startup, setup)
         .add_systems(Update, (
             monitor_file,
@@ -1387,11 +1516,14 @@ fn main() {
             mouse_wheel,
             mouse_button_input,
             update_camera,
+            export_system,
+            update_ui,
+            update_triangle_meshes,
+        ))
+        .add_systems(PostUpdate, (
             draw_bones,
             draw_triangles,
             draw_axes,
-            export_system,
-            update_ui,
         ))
         .run();
 }
