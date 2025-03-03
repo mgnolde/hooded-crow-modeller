@@ -37,6 +37,13 @@ pub struct Bone {
     pub resolved_rotation: f32,
 }
 
+// Triangle definition
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq, Hash)]
+pub struct TriangleRef {
+    pub name: String,
+    pub position: usize,
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct SkinVert {
     #[serde(default)]
@@ -49,6 +56,8 @@ pub struct SkinVert {
     pub weight: f32,          // Weight of influence
     #[serde(default)]
     pub id: Option<String>,   // Optional identifier for the skin vertex
+    #[serde(default)]
+    pub triangles: HashMap<String, usize>, // Triangle references: face_name -> vertex position
 }
 
 impl Default for SkinVert {
@@ -59,13 +68,14 @@ impl Default for SkinVert {
             rotation: 0.0,        // Default to 0 degrees
             weight: 1.0,          // Default to full weight
             id: None,             // Default to no id
+            triangles: HashMap::new(), // Default to no triangle references
         }
     }
 }
 
 impl SkinVert {
     /// Calculate the position of this skin vertex relative to the bone
-    pub fn calculate_position(&self, bone_start: Vec3, bone_end: Vec3) -> Vec3 {
+    pub fn calculate_position(&self, bone_start: Vec3, bone_end: Vec3, bone_rotation: f32) -> Vec3 {
         // Calculate the direction of the bone
         let bone_direction = (bone_end - bone_start).normalize();
         let bone_length = (bone_end - bone_start).length();
@@ -78,38 +88,26 @@ impl SkinVert {
             return segment_position;
         }
         
-        // Calculate perpendicular vectors to create a coordinate system around the bone
-        // First perpendicular vector - prefer using the global Y-axis for stability if possible
+        // Create coordinate system for the bone
+        // First perpendicular vector - try to use global Y axis
         let perp1 = if bone_direction.dot(Vec3::Y).abs() < 0.99 {
-            // If bone is not nearly parallel to Y, use Y to find perpendicular
             bone_direction.cross(Vec3::Y).normalize()
         } else {
-            // If bone is nearly parallel to Y, use X to find perpendicular
             bone_direction.cross(Vec3::X).normalize()
         };
         
         // Second perpendicular vector to complete the orthogonal basis
         let perp2 = bone_direction.cross(perp1).normalize();
         
-        // Calculate rotation around the bone (in radians)
-        let rotation_rad = self.rotation.to_radians();
+        // Convert rotation to radians and combine with bone rotation
+        let combined_angle_rad = (self.rotation + bone_rotation).to_radians();
         
-        // Apply distance and rotation to get the final position
-        let offset = perp1 * self.distance * rotation_rad.cos() + 
-                     perp2 * self.distance * rotation_rad.sin();
+        // Calculate the offset from the bone in the perpendicular plane
+        let offset = perp1 * self.distance * combined_angle_rad.cos() +
+                     perp2 * self.distance * combined_angle_rad.sin();
         
-        let final_pos = segment_position + offset;
-        
-        eprintln!("Skin vert calculation: segment={}, distance={}, rotation={}°", 
-                  self.segment_length, self.distance, self.rotation);
-        eprintln!("  bone_start={:?}, bone_end={:?}, bone_length={}", 
-                 bone_start, bone_end, bone_length);
-        eprintln!("  segment_position={:?}", segment_position);
-        eprintln!("  perp1={:?}, perp2={:?}", perp1, perp2);
-        eprintln!("  rotation_rad={}, offset={:?}", rotation_rad, offset);
-        eprintln!("  final_position={:?}", final_pos);
-        
-        final_pos
+        // Final position is the base position plus the offset
+        segment_position + offset
     }
 }
 
@@ -162,8 +160,6 @@ impl Default for BonePosition {
 }
 
 fn calculate_direction(orientation: f32, slope: f32) -> Vec3 {
-    eprintln!("\nCalculating direction for slope={}, orientation={}", slope, orientation);
-    
     // For vertical slopes (±90°), use the raw slope value
     if (slope - 90.0).abs() < 0.001 || (slope + 90.0).abs() < 0.001 {
         // Convert slope to unit direction: +90° -> +1, -90° -> -1
@@ -183,23 +179,7 @@ fn calculate_direction(orientation: f32, slope: f32) -> Vec3 {
 
 impl Model {
     pub fn from_toml(content: &str) -> Result<Self, Box<dyn Error>> {
-        eprintln!("!!! MODEL CREATION STARTED !!!");
-        eprintln!("Content:\n{}", content);
-        
         let config: toml::Value = content.parse()?;
-        eprintln!("Parsed TOML:\n{:#?}", config);
-        
-        eprintln!("!!! CHECKING FOR SKIN VERTS IN TOML !!!");
-        if let Some(body) = config.get("body").and_then(|v| v.as_table()) {
-            if let Some(lower_spine) = body.get("lower_spine").and_then(|v| v.as_table()) {
-                eprintln!("Found lower_spine: {:?}", lower_spine.keys().collect::<Vec<_>>());
-                if let Some(skin_verts) = lower_spine.get("skin_verts") {
-                    eprintln!("Found lower_spine.skin_verts: {:?}", skin_verts);
-                } else {
-                    eprintln!("No skin_verts in lower_spine");
-                }
-            }
-        }
         
         let mut bones = HashMap::new();
 
@@ -214,13 +194,10 @@ impl Model {
         }
 
         fn parse_skin_verts(table: &toml::value::Table) -> Vec<SkinVert> {
-            eprintln!("SKINVERT: Parsing skin_verts for bone table: {:?}", table.get("name"));
-            
             // Check if skin_verts is present
             if let Some(skin_verts_value) = table.get("skin_verts") {
                 // Array format: skin_verts = [{ segment_length = 0.2, ... }]
                 if let Some(skin_verts_array) = skin_verts_value.as_array() {
-                    eprintln!("SKINVERT: Found {} skin vertices in TOML array format", skin_verts_array.len());
                     let result: Vec<SkinVert> = skin_verts_array.iter().map(|v| {
                         let mut skin_vert = SkinVert::default();
                         if let Some(segment_length) = v.get("segment_length").and_then(|v| v.as_float()) {
@@ -238,17 +215,23 @@ impl Model {
                         if let Some(id) = v.get("id").and_then(|v| v.as_str()) {
                             skin_vert.id = Some(id.to_string());
                         }
-                        eprintln!("SKINVERT: Created skin vertex: segment={}, distance={}, rotation={}, weight={}, id={:?}",
-                                skin_vert.segment_length, skin_vert.distance, skin_vert.rotation, skin_vert.weight, skin_vert.id);
+                        
+                        // Parse triangle references
+                        if let Some(triangles) = v.get("triangles").and_then(|v| v.as_table()) {
+                            for (face_name, position) in triangles {
+                                if let Some(pos) = position.as_integer() {
+                                    skin_vert.triangles.insert(face_name.clone(), pos as usize);
+                                }
+                            }
+                        }
+                        
                         skin_vert
                     }).collect();
-                    eprintln!("SKINVERT: Returning {} processed skin vertices from array format", result.len());
                     return result;
                 }
                 
                 // Table format: skin_verts = { "id1" = { segment_length = 0.2, ... } }
                 if let Some(skin_verts_table) = skin_verts_value.as_table() {
-                    eprintln!("SKINVERT: Found {} skin vertices in TOML table format", skin_verts_table.len());
                     let result: Vec<SkinVert> = skin_verts_table.iter().map(|(id, props)| {
                         let mut skin_vert = SkinVert::default();
                         skin_vert.id = Some(id.to_string());
@@ -266,16 +249,21 @@ impl Model {
                             skin_vert.weight = weight as f32;
                         }
                         
-                        eprintln!("SKINVERT: Created skin vertex: segment={}, distance={}, rotation={}, weight={}, id={:?}",
-                               skin_vert.segment_length, skin_vert.distance, skin_vert.rotation, skin_vert.weight, skin_vert.id);
+                        // Parse triangle references
+                        if let Some(triangles) = props.get("triangles").and_then(|v| v.as_table()) {
+                            for (face_name, position) in triangles {
+                                if let Some(pos) = position.as_integer() {
+                                    skin_vert.triangles.insert(face_name.clone(), pos as usize);
+                                }
+                            }
+                        }
+                        
                         skin_vert
                     }).collect();
-                    eprintln!("SKINVERT: Returning {} processed skin vertices from table format", result.len());
                     return result;
                 }
             }
             
-            eprintln!("SKINVERT: No valid skin_verts found in table");
             Vec::new()
         }
 
@@ -284,9 +272,6 @@ impl Model {
             current_path: &str, 
             bones: &mut HashMap<String, Group>
         ) -> Group {
-            eprintln!("\nProcessing table at path: {}", current_path);
-            eprintln!("Table keys: {:?}", table.keys().collect::<Vec<_>>());
-            
             // Create current group
             let mut current_group = Group {
                 bones: HashMap::new(),
@@ -324,12 +309,6 @@ impl Model {
                 // Resolve inherited values
                 bone.resolve_values(parent_bone);
                 
-                eprintln!("Created bone: {:?}", bone);
-                eprintln!("Bone properties: length={}, raw orientation={:?}, raw slope={:?}, raw rotation={:?}", 
-                         bone.length, bone.orientation, bone.slope, bone.rotation);
-                eprintln!("Resolved values: orientation={}, slope={}, rotation={}", 
-                         bone.resolved_orientation, bone.resolved_slope, bone.resolved_rotation);
-                
                 current_group.bones.insert(current_path.to_string(), bone);
             }
             
@@ -347,17 +326,11 @@ impl Model {
                         format!("{}.{}", current_path, key)
                     };
                     
-                    eprintln!("Processing subgroup {} at path {}", key, new_path);
-                    
                     // Recursively collect bones from subgroup
                     let subgroup = collect_bones(nested_table, &new_path, bones);
                     
                     // Add subgroup if it has bones or subgroups
                     if !subgroup.bones.is_empty() || !subgroup.subgroups.is_empty() {
-                        eprintln!("Adding subgroup {} with {} bones and {} subgroups", 
-                                key, subgroup.bones.len(), subgroup.subgroups.len());
-                        eprintln!("Subgroup bones: {:?}", subgroup.bones);
-                        eprintln!("Subgroup subgroups: {:?}", subgroup.subgroups);
                         current_group.subgroups.insert(key.clone(), subgroup);
                     }
                 }
@@ -365,10 +338,6 @@ impl Model {
             
             // Store the group in the bones map
             if !current_group.bones.is_empty() || !current_group.subgroups.is_empty() {
-                eprintln!("Inserting group at path {} with {} bones and {} subgroups", 
-                         current_path, current_group.bones.len(), current_group.subgroups.len());
-                eprintln!("Group bones: {:?}", current_group.bones);
-                eprintln!("Group subgroups: {:?}", current_group.subgroups);
                 bones.insert(current_path.to_string(), current_group.clone());
             }
             
@@ -376,27 +345,8 @@ impl Model {
         }
 
         if let Some(body) = config.get("body").and_then(|v| v.as_table()) {
-            eprintln!("\n!!! BODY SECTION FOUND !!!");
-            eprintln!("Body table keys: {:?}", body.keys().collect::<Vec<_>>());
             let root_group = collect_bones(body, "body", &mut bones);
             bones.insert("body".to_string(), root_group);
-            eprintln!("\n!!! BONES COLLECTED !!!");
-            eprintln!("Created {} bones", bones.len());
-            
-            // Debug output for all bones
-            eprintln!("\n!!! ALL BONES IN MAP !!!");
-            for (path, group) in &bones {
-                eprintln!("Group at {}: {} bones, {} subgroups", 
-                         path, group.bones.len(), group.subgroups.len());
-                for (bone_name, bone) in &group.bones {
-                    eprintln!("  Bone: {} -> length={}, orientation={:?}, slope={:?}, rotation={:?}", 
-                             bone_name, bone.length, bone.orientation, bone.slope, bone.rotation);
-                }
-                for (subname, subgroup) in &group.subgroups {
-                    eprintln!("  Subgroup {}: {} bones, {} subgroups", 
-                             subname, subgroup.bones.len(), subgroup.subgroups.len());
-                }
-            }
             
             Ok(Model(bones))
         } else {
@@ -408,13 +358,8 @@ impl Model {
         let mut bones = HashMap::new();
         
         fn collect_bones_from_group(group: &Group, bones: &mut HashMap<String, Bone>) {
-            eprintln!("Collecting bones from group with {} bones and {} subgroups", 
-                     group.bones.len(), group.subgroups.len());
-            
             // Add bones from current group
             for (name, bone) in &group.bones {
-                eprintln!("Adding bone {} -> length={}, orientation={:?}, slope={:?}, rotation={:?}", 
-                         name, bone.length, bone.orientation, bone.slope, bone.rotation);
                 bones.insert(name.clone(), bone.clone());
             }
             
@@ -429,7 +374,6 @@ impl Model {
             collect_bones_from_group(group, &mut bones);
         }
         
-        eprintln!("Collected {} bones total", bones.len());
         bones
     }
 
@@ -474,7 +418,6 @@ impl Model {
 
             // Prevent cycles
             if !visited.insert(bone_name.to_string()) {
-                eprintln!("Warning: Cycle detected at bone {}", bone_name);
                 return 0;
             }
 
@@ -490,7 +433,6 @@ impl Model {
                 calculate_depth(parent, bones, depths, visited) + 1
             };
 
-            eprintln!("Calculated depth for {}: {}", bone_name, depth);
             depths.insert(bone_name.to_string(), depth);
             depth
         }
@@ -501,23 +443,12 @@ impl Model {
             calculate_depth(bone_name, &bones, &mut depths, &mut visited);
         }
 
-        // Debug output
-        eprintln!("\n!!! BONE DEPTHS !!!");
-        let mut depth_list: Vec<_> = depths.iter().collect();
-        depth_list.sort_by_key(|(_, &depth)| depth);
-        for (bone, depth) in depth_list {
-            eprintln!("Bone: {} -> Depth: {}", bone, depth);
-        }
-
         depths
     }
 
     pub fn calculate_bone_positions(&self) -> Vec<(String, Vec3, Vec3, [f32; 3])> {
         let mut positions = Vec::new();
         let bones = self.get_bones();
-        
-        eprintln!("\n!!! CALCULATING BONE POSITIONS !!!");
-        eprintln!("Found {} bones: {:?}", bones.len(), bones.keys().collect::<Vec<_>>());
         
         for (name, bone) in bones {
             let level = name.matches('.').count();
@@ -528,35 +459,92 @@ impl Model {
                 _ => [1.0, 1.0, 1.0], // White
             };
             
-            eprintln!("\nProcessing bone: {}", name);
-            eprintln!("Level: {}, Color: {:?}", level, color);
-            eprintln!("Properties: length={}, raw orientation={:?}, raw slope={:?}, raw rotation={:?}", 
-                     bone.length, bone.orientation, bone.slope, bone.rotation);
-            eprintln!("Resolved values: orientation={}, slope={}, rotation={}", 
-                     bone.resolved_orientation, bone.resolved_slope, bone.resolved_rotation);
-            
             let start = Vec3::ZERO;
             
             // Get base direction from orientation and slope
             let direction = calculate_direction(bone.resolved_orientation, bone.resolved_slope);
-            eprintln!("Final direction vector: {:?}", direction);
             
             let end = start + (direction * bone.length);
-            eprintln!("Start: {:?}, End: {:?}", start, end);
             
             positions.push((name.clone(), start, end, color));
-            
-            eprintln!("Final position: start={:?}, end={:?}, direction={:?}", start, end, direction);
-        }
-        
-        eprintln!("\n!!! BONE POSITIONS CALCULATED !!!");
-        eprintln!("Total positions: {}", positions.len());
-        for (name, start, end, color) in &positions {
-            eprintln!("  {}: start={:?}, end={:?}, color={:?}", name, start, end, color);
         }
         
         positions
     }
+
+    pub fn collect_triangles(&self) -> Vec<Triangle> {
+        let bone_positions = self.calculate_bone_positions();
+        let bone_position_map: HashMap<_, _> = bone_positions
+            .into_iter()
+            .map(|(name, start, end, _)| (name, (start, end)))
+            .collect();
+        
+        // First, collect all triangle references from all skin vertices
+        let mut triangle_refs: HashMap<String, Vec<(usize, String, Vec3)>> = HashMap::new();
+        
+        for (bone_name, bone) in self.get_bones() {
+            if let Some((bone_start, bone_end)) = bone_position_map.get(&bone_name) {
+                for skin_vert in &bone.skin_verts {
+                    // Calculate the actual position of this skin vertex
+                    let position = skin_vert.calculate_position(*bone_start, *bone_end, bone.resolved_rotation);
+                    
+                    // Print debug info for this vertex
+                    println!("Triangle Vertex: bone={}, id={:?}, pos={:?}, triangles={:?}", 
+                             bone_name, skin_vert.id, position, skin_vert.triangles);
+                    
+                    // Add each triangle reference
+                    for (face_name, position_in_triangle) in &skin_vert.triangles {
+                        triangle_refs
+                            .entry(face_name.clone())
+                            .or_insert_with(Vec::new)
+                            .push((*position_in_triangle, bone_name.clone(), position));
+                    }
+                }
+            }
+        }
+        
+        // Now, build the triangles from the collected references
+        let mut triangles = Vec::new();
+        
+        for (face_name, mut vertices) in triangle_refs {
+            // Sort vertices by their position in the triangle
+            vertices.sort_by_key(|(pos, _, _)| *pos);
+            
+            // Print debug info about this triangle
+            println!("Triangle '{}' has {} vertices", face_name, vertices.len());
+            for (i, (pos_in_tri, bone, pos)) in vertices.iter().enumerate() {
+                println!("  Vertex {}: pos_in_tri={}, bone={}, pos={:?}", i, pos_in_tri, bone, pos);
+            }
+            
+            // Check if we have exactly three vertices for a triangle
+            if vertices.len() == 3 {
+                let positions = [vertices[0].2, vertices[1].2, vertices[2].2];
+                let bone_names = [
+                    vertices[0].1.clone(), 
+                    vertices[1].1.clone(), 
+                    vertices[2].1.clone()
+                ];
+                
+                triangles.push(Triangle {
+                    name: face_name,
+                    vertices: positions,
+                    bone_names,
+                });
+            } else {
+                eprintln!("WARNING: Triangle '{}' has {} vertices, expected 3", 
+                         face_name, vertices.len());
+            }
+        }
+        
+        triangles
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Triangle {
+    pub name: String,
+    pub vertices: [Vec3; 3],
+    pub bone_names: [String; 3],
 }
 
 // Helper function to convert HSV to RGB
