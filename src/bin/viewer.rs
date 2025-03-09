@@ -159,9 +159,9 @@ fn calculate_transform(orientation: f32, slope: f32, rotation: f32) -> Mat4 {
         // For non-vertical slopes, create a transform that:
         // 1. Points along +Z at 0 orientation
         // 2. Rotates by orientation around Y (positive = towards +X)
-        // 3. Tilts up/down by slope around the local X axis
+        // 3. Tilts up/down by slope around the local X axis (INVERTED to match vertical case)
         // 4. Applies final rotation around the bone's axis
-        let slope_rot = Mat4::from_rotation_x(slope_rad);
+        let slope_rot = Mat4::from_rotation_x(-slope_rad); // Invert sign so positive slopes point up
         let orientation_rot = Mat4::from_rotation_y(orientation_rad);
         let rotation_rot = Mat4::from_rotation_z(rotation_rad);
         
@@ -189,9 +189,10 @@ fn process_bone_group(
         println!("Looking for parent: {}", parent_path);
 
         // Get the parent bone's end position
-        let start = if bone_path == "body.lower_spine" {
-            println!("Root bone, starting at origin");
-            Vec3::ZERO // Only the root bone starts at origin
+        let start = if bone_path.starts_with("body.") && bone_path.matches('.').count() == 1 {
+            // Any direct child of "body" starts at the origin
+            println!("Root bone, starting at origin: {}", bone_path);
+            Vec3::ZERO
         } else {
             // Get parent's end position from the positions map
             match positions.get(parent_path) {
