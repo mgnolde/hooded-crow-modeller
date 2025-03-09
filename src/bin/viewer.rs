@@ -971,7 +971,13 @@ fn update_triangle_meshes(
     mesh_data: Option<Res<MeshData>>,
     settings: Res<VisualizationSettings>,
     mut triangle_handles: ResMut<TriangleMeshHandles>,
+    mut file_events: EventReader<FileChangedEvent>,
 ) {
+    // Only update if we received a file change event
+    if file_events.is_empty() {
+        return;
+    }
+
     // Clear previous triangle meshes
     for entity in triangle_handles.handles.drain(..) {
         commands.entity(entity).despawn();
@@ -1558,7 +1564,7 @@ fn main() {
             update_camera,
             export_system,
             update_ui,
-            update_triangle_meshes,
+            update_triangle_meshes.after(handle_file_changes),
         ))
         .add_systems(PostUpdate, (
             draw_bones,
