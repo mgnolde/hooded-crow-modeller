@@ -24,7 +24,8 @@ pub struct Bone {
     pub slope: Option<f32>,
     #[serde(default)]
     pub rotation: Option<f32>,
-    
+    #[serde(default)]
+    pub color: Option<[f32; 4]>,
     #[serde(default)]
     pub skin_verts: Vec<SkinVert>,
     
@@ -58,6 +59,8 @@ pub struct SkinVert {
     pub id: Option<String>,   // Optional identifier for the skin vertex
     #[serde(default)]
     pub triangles: HashMap<String, usize>, // Triangle references: face_name -> vertex position
+    #[serde(default)]
+    pub color: Option<[f32; 4]>, // Color for this vertex
 }
 
 impl Default for SkinVert {
@@ -69,6 +72,7 @@ impl Default for SkinVert {
             weight: 1.0,          // Default to full weight
             id: None,             // Default to no id
             triangles: HashMap::new(), // Default to no triangle references
+            color: None,          // Default to no color
         }
     }
 }
@@ -225,6 +229,14 @@ impl Model {
                             }
                         }
                         
+                        // Parse color
+                        if let Some(color) = v.get("color").and_then(|v| v.as_array()) {
+                            skin_vert.color = Some([color[0].as_float().unwrap_or(1.0) as f32,
+                                                    color[1].as_float().unwrap_or(1.0) as f32,
+                                                    color[2].as_float().unwrap_or(1.0) as f32,
+                                                    color.get(3).and_then(|c| c.as_float()).unwrap_or(1.0) as f32]);
+                        }
+                        
                         skin_vert
                     }).collect();
                     return result;
@@ -256,6 +268,14 @@ impl Model {
                                     skin_vert.triangles.insert(face_name.clone(), pos as usize);
                                 }
                             }
+                        }
+                        
+                        // Parse color
+                        if let Some(color) = props.get("color").and_then(|v| v.as_array()) {
+                            skin_vert.color = Some([color[0].as_float().unwrap_or(1.0) as f32,
+                                                    color[1].as_float().unwrap_or(1.0) as f32,
+                                                    color[2].as_float().unwrap_or(1.0) as f32,
+                                                    color.get(3).and_then(|c| c.as_float()).unwrap_or(1.0) as f32]);
                         }
                         
                         skin_vert
@@ -300,6 +320,11 @@ impl Model {
                     rotation: table.get("rotation")
                         .and_then(|v| v.as_float().or_else(|| v.as_integer().map(|i| i as f64)))
                         .map(|v| v as f32),
+                    color: table.get("color").and_then(|v| v.as_array())
+                        .map(|color| [color[0].as_float().unwrap_or(1.0) as f32,
+                                      color[1].as_float().unwrap_or(1.0) as f32,
+                                      color[2].as_float().unwrap_or(1.0) as f32,
+                                      color.get(3).and_then(|c| c.as_float()).unwrap_or(1.0) as f32]),
                     skin_verts: parse_skin_verts(table),
                     resolved_orientation: 0.0,
                     resolved_slope: 0.0,
@@ -309,6 +334,22 @@ impl Model {
                 // Resolve inherited values
                 bone.resolve_values(parent_bone);
                 
+                // Extract color values from skin vertices
+                if let Some(skin_verts_value) = table.get("skin_verts") {
+                    if let Some(skin_verts_array) = skin_verts_value.as_array() {
+                        for skin_vert in skin_verts_array {
+                            if let Some(color) = skin_vert.get("color").and_then(|v| v.as_array()) {
+                                let extracted_color = [color[0].as_float().unwrap_or(1.0) as f32,
+                                                       color[1].as_float().unwrap_or(1.0) as f32,
+                                                       color[2].as_float().unwrap_or(1.0) as f32,
+                                                       color.get(3).and_then(|c| c.as_float()).unwrap_or(1.0) as f32];
+                                println!("Extracted color for bone {}: {:?}", current_path, extracted_color);
+                                bone.color = Some(extracted_color);
+                            }
+                        }
+                    }
+                }
+                
                 current_group.bones.insert(current_path.to_string(), bone);
             }
             
@@ -316,7 +357,7 @@ impl Model {
             for (key, value) in table {
                 if let Some(nested_table) = value.as_table() {
                     // Skip keys that are bone properties
-                    if key == "length" || key == "orientation" || key == "slope" || key == "rotation" || key == "skin_verts" {
+                    if key == "length" || key == "orientation" || key == "slope" || key == "rotation" || key == "skin_verts" || key == "color" {
                         continue;
                     }
                     

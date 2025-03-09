@@ -8,19 +8,19 @@ rotation = 0
 
 [body.lower_spine.skin_verts]
 # Triangle vertices with clearer positions
-ls1 = { segment_length = 0.5, distance = 0.3, rotation = 0, triangles = { f1 = 0 } }
-ls2 = { segment_length = 0.3, distance = 0.2, rotation = 90, triangles = { f1 = 1 } }
-ls3 = { segment_length = 0.6, distance = 0.4, rotation = 180, triangles = { f1 = 2 } }
-ls4 = { segment_length = 0.5, distance = 0.3, rotation = 270 }
+ls1 = { segment_length = 0.5, distance = 0.3, rotation = 0, triangles = { f1 = 0 }, color = [0.0,0.0,1.0,0.5] }
+ls2 = { segment_length = 0.3, distance = 0.6, rotation = 90, triangles = { f1 = 1 }, color = [0.0,0.0,1.0,0.5] }
+ls3 = { segment_length = 0.6, distance = 0.4, rotation = 180, triangles = { f1 = 2 }, color = [0.0,0.0,1.0,0.5] }
+ls4 = { segment_length = 0.5, distance = 0.3, rotation = 270, color = [0.0,0.0,1.0,0.5] }
 
 [body.lower_spine.middle_spine]
 length = 0.18
 
 [body.lower_spine.middle_spine.skin_verts]
-ms1 = { segment_length = 0.2, distance = 0.3, rotation = 45 }
-ms2 = { segment_length = 0.4, distance = 0.3, rotation = 45 }
-ms3 = { segment_length = 0.6, distance = 0.3, rotation = 45 }
-ms4 = { segment_length = 0.8, distance = 0.3, rotation = 45 }
+ms1 = { segment_length = 0.2, distance = 0.3, rotation = 45, color = [0.5,0.5,0.5,0.5] }
+ms2 = { segment_length = 0.4, distance = 0.3, rotation = 45, color = [0.5,0.5,0.5,0.5] }
+ms3 = { segment_length = 0.6, distance = 0.3, rotation = 45, color = [0.5,0.5,0.5,0.5] }
+ms4 = { segment_length = 0.8, distance = 0.3, rotation = 45, color = [0.5,0.5,0.5,0.5] }
 
 [body.lower_spine.middle_spine.upper_spine]
 length = 0.15
@@ -32,9 +32,9 @@ slope = 20
 rotation = 0
 
 [body.lower_spine.middle_spine.upper_spine.left_upper_arm.skin_verts]
-ua1 = { segment_length = 0.25, distance = 0.3, rotation = 0 }
-ua2 = { segment_length = 0.5, distance = 0.3, rotation = 0 }
-ua3 = { segment_length = 0.75, distance = 0.3, rotation = 0 }
+ua1 = { segment_length = 0.25, distance = 0.3, rotation = 0, color = [0.5,0.5,0.5,0.5] }
+ua2 = { segment_length = 0.5, distance = 0.3, rotation = 0, color = [0.5,0.5,0.5,0.5] }
+ua3 = { segment_length = 0.75, distance = 0.3, rotation = 0, color = [0.5,0.5,0.5,0.5] }
 
 [body.lower_spine.middle_spine.upper_spine.left_upper_arm.left_lower_arm]
 length = 0.3
@@ -61,10 +61,10 @@ length = 0.12
 length = 0.25
 
 [body.lower_spine.middle_spine.upper_spine.neck.head.skin_verts]
-n1 = { segment_length = 0.5, distance = 0.3, rotation = 0 }
-n2 = { segment_length = 0.5, distance = 0.3, rotation = 90 }
-n3 = { segment_length = 0.5, distance = 0.3, rotation = 180 }
-n4 = { segment_length = 0.5, distance = 0.3, rotation = 270 }
+n1 = { segment_length = 0.5, distance = 0.3, rotation = 0, color = [0.5,0.5,0.5,0.5] }
+n2 = { segment_length = 0.5, distance = 0.3, rotation = 90, color = [0.5,0.5,0.5,0.5] }
+n3 = { segment_length = 0.5, distance = 0.3, rotation = 180, color = [0.5,0.5,0.5,0.5] }
+n4 = { segment_length = 0.5, distance = 0.3, rotation = 270, color = [0.5,0.5,0.5,0.5] }
 
 [body.left_pelvis]
 length = 0.3
@@ -85,10 +85,10 @@ slope = -45
 orientation = -90
 
 [body.left_pelvis.left_upper_leg.left_lower_leg.left_foot.skin_verts]
-lf1 = { segment_length = 0.5, distance = 0.3, rotation = 0 }
-lf2 = { segment_length = 0.5, distance = 0.3, rotation = 90 }
-lf3 = { segment_length = 0.5, distance = 0.3, rotation = 180 }
-lf4 = { segment_length = 0.5, distance = 0.3, rotation = 270 }
+lf1 = { segment_length = 0.5, distance = 0.3, rotation = 0, color = [0.5,0.5,0.5,0.5] }
+lf2 = { segment_length = 0.5, distance = 0.3, rotation = 90, color = [0.5,0.5,0.5,0.5] }
+lf3 = { segment_length = 0.5, distance = 0.3, rotation = 180, color = [0.5,0.5,0.5,0.5] }
+lf4 = { segment_length = 0.5, distance = 0.3, rotation = 270, color = [0.5,0.5,0.5,0.5] }
 
 [body.right_pelvis]
 length = 0.3
@@ -108,7 +108,7 @@ slope = -45
 orientation = -90
 
 [body.right_pelvis.right_upper_leg.right_lower_leg.right_foot.skin_verts]
-rf1 = { segment_length = 0.5, distance = 0.3, rotation = 0 }
-rf2 = { segment_length = 0.5, distance = 0.3, rotation = 90 }
-rf3 = { segment_length = 0.5, distance = 0.3, rotation = 180 }
-rf4 = { segment_length = 0.5, distance = 0.3, rotation = 270 }
+rf1 = { segment_length = 0.5, distance = 0.3, rotation = 0, color = [0.5,0.5,0.5,0.5] }
+rf2 = { segment_length = 0.5, distance = 0.3, rotation = 90, color = [0.5,0.5,0.5,0.5] }
+rf3 = { segment_length = 0.5, distance = 0.3, rotation = 180, color = [0.5,0.5,0.5,0.5] }
+rf4 = { segment_length = 0.5, distance = 0.3, rotation = 270, color = [0.5,0.5,0.5,0.5] }

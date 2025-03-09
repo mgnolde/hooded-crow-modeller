@@ -40,8 +40,9 @@ struct BonePosition {
 struct MeshData {
     positions: HashMap<String, BonePosition>,
     transforms: HashMap<String, Mat4>,
-    skin_vertex_positions: Vec<(Vec3, [f32; 3], Option<String>)>, // Store skin vertex positions, colors and IDs
+    skin_vertex_positions: Vec<(Vec3, [f32; 3], Option<String>, [f32; 4])>, // Store skin vertex positions, colors and IDs
     triangles: HashMap<String, [Vec3; 3]>, // Store triangles as (name, [vertex positions])
+    skin_vertex_colors: Vec<[f32; 4]>, // Store colors for skin vertices
 }
 
 impl Default for MeshData {
@@ -51,6 +52,7 @@ impl Default for MeshData {
             transforms: HashMap::new(),
             skin_vertex_positions: Vec::new(),
             triangles: HashMap::new(),
+            skin_vertex_colors: Vec::new(),
         }
     }
 }
@@ -387,10 +389,10 @@ fn handle_file_changes(
         
         // Process bones to build positions and skin vertices
         let bones = model.get_bones();
-        println!("Found {} bones in the model", bones.len());
-        for (path, bone) in &bones {
-            println!("Processing bone: {} with {} skin vertices", path, bone.skin_verts.len());
-        }
+        // println!("Found {} bones in the model", bones.len());
+        // for (path, bone) in &bones {
+        //     println!("Processing bone: {} with {} skin vertices", path, bone.skin_verts.len());
+        // }
 
         // Initialize transform and position maps
         let mut transforms = HashMap::new();
@@ -410,13 +412,14 @@ fn handle_file_changes(
         let mut positions_with_colors: HashMap<String, (Vec3, Vec3, [f32; 3])> = HashMap::new();
         let mut skin_vertex_positions = Vec::new();
         let mut triangles: HashMap<String, [Vec3; 3]> = HashMap::new();
+        let mut skin_vertex_colors = Vec::new();
         
         // Iterate through all bones in the model
-        println!("SETUP: Processing bones for positions and skin vertices");
+        // println!("SETUP: Processing bones for positions and skin vertices");
         let all_bones = model.get_bones();
-        println!("SETUP: Model has {} total bones", all_bones.len());
+        // println!("SETUP: Model has {} total bones", all_bones.len());
         for (full_path, bone) in &all_bones {
-            println!("SETUP: Processing bone {} with {} skin verts", full_path, bone.skin_verts.len());
+            // println!("SETUP: Processing bone {} with {} skin verts", full_path, bone.skin_verts.len());
             
             // Store bone position and color
             if let Some((start, end)) = positions.get(full_path.as_str()) {
@@ -425,38 +428,45 @@ fn handle_file_changes(
                 positions_with_colors.insert(full_path.clone(), (*start, *end, color));
                 
                 // Process skin vertices for this bone
-                println!("Processing skin vertices for bone: {}", full_path);
-                println!("  Bone has {} skin vertices", bone.skin_verts.len());
-                println!("  Bone position: start={:?}, end={:?}", start, end);
+                // println!("Processing skin vertices for bone: {}", full_path);
+                // println!("  Bone has {} skin vertices", bone.skin_verts.len());
+                // println!("  Bone position: start={:?}, end={:?}", start, end);
                 
                 for skin_vert in &bone.skin_verts {
                     // Calculate position of skin vertex using the bone's start and end
                     let position = skin_vert.calculate_position(*start, *end, bone.resolved_rotation);
                     
-                    // Use a rainbow color based on the bone depth
-                    let color = get_rainbow_color(bone_depth, max_depth).0;
+                    // Use the skin vertex's color if available, otherwise use bone's color or default
+                    let color = skin_vert.color
+                        .or_else(|| bone.color)
+                        .unwrap_or_else(|| [0.5, 0.5, 0.5, 0.5]);
                     
                     // Store the vertex position and ID
                     let id = skin_vert.id.clone().unwrap_or_else(|| full_path.clone());
                     
                     // Add skin vertex to our collection
-                    skin_vertex_positions.push((position, color, Some(id.clone())));
-                    println!("PROCESSING: Added skin vertex at {:?} for bone '{}' with id {:?}", position, full_path, id);
+                    skin_vertex_positions.push((position, [1.0, 1.0, 1.0], Some(id.clone()), color));
+                    skin_vertex_colors.push(color);
+                    // println!("PROCESSING: Added skin vertex at {:?} for bone '{}' with id {:?}", position, full_path, id);
                 }
             }
         }
 
+        println!("Loaded skin vertex colors from TOML: {:?}", skin_vertex_colors);
+
         // Get triangles directly from calculated vertices rather than from model.collect_triangles()
         
-        // Create a map of vertex IDs to positions for faster lookup
-        let vertex_id_map: HashMap<String, Vec3> = skin_vertex_positions.iter()
-            .filter_map(|(pos, _, id)| {
-                id.as_ref().map(|id| (id.clone(), *pos))
+        // Create a map of vertex IDs to positions and colors for faster lookup
+        let vertex_id_map: HashMap<String, (Vec3, [f32; 4])> = skin_vertex_positions.iter()
+            .filter_map(|(pos, _, id, color)| {
+                id.as_ref().map(|id| (id.clone(), (*pos, *color)))
             })
             .collect();
 
         // Get triangle definitions from the model
         let bones = model.get_bones();
+        let mut triangle_colors: HashMap<String, [f32; 4]> = HashMap::new();
+        
         for (bone_name, bone) in &bones {
             for skin_vert in &bone.skin_verts {
                 // For each triangle this vertex is part of
@@ -469,12 +479,17 @@ fn handle_file_changes(
                         triangles.insert(face_name.clone(), [Vec3::ZERO, Vec3::ZERO, Vec3::ZERO]);
                     }
                     
-                    // Set the vertex position in the triangle
-                    if let Some(position) = vertex_id_map.get(&vertex_id) {
+                    // Set the vertex position and color in the triangle
+                    if let Some((position, color)) = vertex_id_map.get(&vertex_id) {
                         if let Some(triangle_verts) = triangles.get_mut(face_name) {
                             // Update the vertex at its position in the triangle
                             if *position_in_triangle < 3 {
                                 triangle_verts[*position_in_triangle] = *position;
+                                
+                                // If this is the first vertex (position 0), store its color for the whole triangle
+                                if *position_in_triangle == 0 {
+                                    triangle_colors.insert(face_name.clone(), *color);
+                                }
                             }
                         }
                     }
@@ -482,6 +497,17 @@ fn handle_file_changes(
             }
         }
 
+        // Store triangle colors in skin_vertex_colors in the same order as triangles
+        skin_vertex_colors.clear();
+        for (name, vertices) in &triangles {
+            // Find the color of the first vertex in this triangle
+            let first_vertex_color = skin_vertex_positions.iter()
+                .find(|(pos, _, _, color)| *pos == vertices[0])
+                .map(|(_, _, _, color)| *color)
+                .unwrap_or([0.5, 0.5, 0.5, 0.5]); // Default gray if no color found
+            skin_vertex_colors.push(first_vertex_color);
+        }
+        
         // Debug print what triangles we've collected
         println!("TRIANGLES:");
         for (name, verts) in &triangles {
@@ -489,11 +515,11 @@ fn handle_file_changes(
         }
 
         // Create the final MeshData with debug output
-        println!("*** SKIN VERTEX SUMMARY ***");
-        println!("Total skin vertices processed: {}", skin_vertex_positions.len());
-        for (i, (pos, _, id)) in skin_vertex_positions.iter().enumerate() {
-            println!("Vertex {}: position={:?}, id={:?}", i, pos, id);
-        }
+        // println!("*** SKIN VERTEX SUMMARY ***");
+        // println!("Total skin vertices processed: {}", skin_vertex_positions.len());
+        // for (i, (pos, _, id, _)) in skin_vertex_positions.iter().enumerate() {
+        //     println!("Vertex {}: position={:?}, id={:?}", i, pos, id);
+        // }
 
         // Create mesh data
         let mut mesh_data = MeshData::default();
@@ -515,6 +541,7 @@ fn handle_file_changes(
 
         mesh_data.skin_vertex_positions = skin_vertex_positions;
         mesh_data.triangles = triangles;
+        mesh_data.skin_vertex_colors = skin_vertex_colors;
 
         // Set up camera
         commands.spawn((
@@ -595,10 +622,10 @@ fn setup(
 
     // Process bones to build positions and skin vertices
     let bones = model.get_bones();
-    println!("Found {} bones in the model", bones.len());
-    for (path, bone) in &bones {
-        println!("Processing bone: {} with {} skin vertices", path, bone.skin_verts.len());
-    }
+    // println!("Found {} bones in the model", bones.len());
+    // for (path, bone) in &bones {
+    //     println!("Processing bone: {} with {} skin vertices", path, bone.skin_verts.len());
+    // }
 
     // Initialize transform and position maps
     let mut transforms = HashMap::new();
@@ -618,13 +645,14 @@ fn setup(
     let mut positions_with_colors: HashMap<String, (Vec3, Vec3, [f32; 3])> = HashMap::new();
     let mut skin_vertex_positions = Vec::new();
     let mut triangles: HashMap<String, [Vec3; 3]> = HashMap::new();
+    let mut skin_vertex_colors = Vec::new();
     
     // Iterate through all bones in the model
-    println!("SETUP: Processing bones for positions and skin vertices");
+    // println!("SETUP: Processing bones for positions and skin vertices");
     let all_bones = model.get_bones();
-    println!("SETUP: Model has {} total bones", all_bones.len());
+    // println!("SETUP: Model has {} total bones", all_bones.len());
     for (full_path, bone) in &all_bones {
-        println!("SETUP: Processing bone {} with {} skin verts", full_path, bone.skin_verts.len());
+        // println!("SETUP: Processing bone {} with {} skin verts", full_path, bone.skin_verts.len());
         
         // Store bone position and color
         if let Some((start, end)) = positions.get(full_path.as_str()) {
@@ -633,38 +661,45 @@ fn setup(
             positions_with_colors.insert(full_path.clone(), (*start, *end, color));
             
             // Process skin vertices for this bone
-            println!("Processing skin vertices for bone: {}", full_path);
-            println!("  Bone has {} skin vertices", bone.skin_verts.len());
-            println!("  Bone position: start={:?}, end={:?}", start, end);
+            // println!("Processing skin vertices for bone: {}", full_path);
+            // println!("  Bone has {} skin vertices", bone.skin_verts.len());
+            // println!("  Bone position: start={:?}, end={:?}", start, end);
             
             for skin_vert in &bone.skin_verts {
                 // Calculate position of skin vertex using the bone's start and end
                 let position = skin_vert.calculate_position(*start, *end, bone.resolved_rotation);
                 
-                // Use a rainbow color based on the bone depth
-                let color = get_rainbow_color(bone_depth, max_depth).0;
+                // Use the skin vertex's color if available, otherwise use bone's color or default
+                let color = skin_vert.color
+                    .or_else(|| bone.color)
+                    .unwrap_or_else(|| [0.5, 0.5, 0.5, 0.5]);
                 
                 // Store the vertex position and ID
                 let id = skin_vert.id.clone().unwrap_or_else(|| full_path.clone());
                 
                 // Add skin vertex to our collection
-                skin_vertex_positions.push((position, color, Some(id.clone())));
-                println!("PROCESSING: Added skin vertex at {:?} for bone '{}' with id {:?}", position, full_path, id);
+                skin_vertex_positions.push((position, [1.0, 1.0, 1.0], Some(id.clone()), color));
+                skin_vertex_colors.push(color);
+                // println!("PROCESSING: Added skin vertex at {:?} for bone '{}' with id {:?}", position, full_path, id);
             }
         }
     }
 
+    println!("Loaded skin vertex colors from TOML: {:?}", skin_vertex_colors);
+
     // Get triangles directly from calculated vertices rather than from model.collect_triangles()
     
-    // Create a map of vertex IDs to positions for faster lookup
-    let vertex_id_map: HashMap<String, Vec3> = skin_vertex_positions.iter()
-        .filter_map(|(pos, _, id)| {
-            id.as_ref().map(|id| (id.clone(), *pos))
+    // Create a map of vertex IDs to positions and colors for faster lookup
+    let vertex_id_map: HashMap<String, (Vec3, [f32; 4])> = skin_vertex_positions.iter()
+        .filter_map(|(pos, _, id, color)| {
+            id.as_ref().map(|id| (id.clone(), (*pos, *color)))
         })
         .collect();
 
     // Get triangle definitions from the model
     let bones = model.get_bones();
+    let mut triangle_colors: HashMap<String, [f32; 4]> = HashMap::new();
+    
     for (bone_name, bone) in &bones {
         for skin_vert in &bone.skin_verts {
             // For each triangle this vertex is part of
@@ -677,12 +712,17 @@ fn setup(
                     triangles.insert(face_name.clone(), [Vec3::ZERO, Vec3::ZERO, Vec3::ZERO]);
                 }
                 
-                // Set the vertex position in the triangle
-                if let Some(position) = vertex_id_map.get(&vertex_id) {
+                // Set the vertex position and color in the triangle
+                if let Some((position, color)) = vertex_id_map.get(&vertex_id) {
                     if let Some(triangle_verts) = triangles.get_mut(face_name) {
                         // Update the vertex at its position in the triangle
                         if *position_in_triangle < 3 {
                             triangle_verts[*position_in_triangle] = *position;
+                            
+                            // If this is the first vertex (position 0), store its color for the whole triangle
+                            if *position_in_triangle == 0 {
+                                triangle_colors.insert(face_name.clone(), *color);
+                            }
                         }
                     }
                 }
@@ -690,6 +730,17 @@ fn setup(
         }
     }
 
+    // Store triangle colors in skin_vertex_colors in the same order as triangles
+    skin_vertex_colors.clear();
+    for (name, vertices) in &triangles {
+        // Find the color of the first vertex in this triangle
+        let first_vertex_color = skin_vertex_positions.iter()
+            .find(|(pos, _, _, color)| *pos == vertices[0])
+            .map(|(_, _, _, color)| *color)
+            .unwrap_or([0.5, 0.5, 0.5, 0.5]); // Default gray if no color found
+        skin_vertex_colors.push(first_vertex_color);
+    }
+    
     // Debug print what triangles we've collected
     println!("TRIANGLES:");
     for (name, verts) in &triangles {
@@ -697,11 +748,11 @@ fn setup(
     }
 
     // Create the final MeshData with debug output
-    println!("*** SKIN VERTEX SUMMARY ***");
-    println!("Total skin vertices processed: {}", skin_vertex_positions.len());
-    for (i, (pos, _, id)) in skin_vertex_positions.iter().enumerate() {
-        println!("Vertex {}: position={:?}, id={:?}", i, pos, id);
-    }
+    // println!("*** SKIN VERTEX SUMMARY ***");
+    // println!("Total skin vertices processed: {}", skin_vertex_positions.len());
+    // for (i, (pos, _, id, _)) in skin_vertex_positions.iter().enumerate() {
+    //     println!("Vertex {}: position={:?}, id={:?}", i, pos, id);
+    // }
 
     // Create mesh data
     let mut mesh_data = MeshData::default();
@@ -723,6 +774,7 @@ fn setup(
 
     mesh_data.skin_vertex_positions = skin_vertex_positions;
     mesh_data.triangles = triangles;
+    mesh_data.skin_vertex_colors = skin_vertex_colors;
 
     // Set up camera
     commands.spawn((
@@ -934,17 +986,7 @@ fn update_triangle_meshes(
         println!("UPDATING: Creating {} triangle meshes", mesh_data.triangles.len());
 
         // Create a semi-transparent green material
-        let triangle_material = materials.add(StandardMaterial {
-            base_color: Color::rgba(0.2, 0.8, 0.2, 0.5),
-            alpha_mode: AlphaMode::Blend,
-            double_sided: true,  // Make sure both sides are visible
-            cull_mode: None,     // Disable face culling
-            unlit: true,         // Make it unlit so it's always visible regardless of lighting
-            ..default()
-        });
-
-        // Create a mesh for each triangle
-        for (name, vertices) in &mesh_data.triangles {
+        for (i, (name, vertices)) in mesh_data.triangles.iter().enumerate() {
             println!("MESH: Creating triangle mesh '{}'", name);
             
             // Create a mesh for this triangle
@@ -972,11 +1014,22 @@ fn update_triangle_meshes(
             // Set indices
             mesh.insert_indices(Indices::U32(vec![0, 1, 2]));
             
+            // Assign color from skin vertex colors
+            let color = mesh_data.skin_vertex_colors.get(i).unwrap_or(&[0.5, 0.5, 0.5, 0.5]); // Default to gray if no color
+            let triangle_material = materials.add(StandardMaterial {
+                base_color: Color::rgba(color[0], color[1], color[2], color[3]),
+                alpha_mode: AlphaMode::Blend,
+                double_sided: true,  // Make sure both sides are visible
+                cull_mode: None,     // Disable face culling
+                unlit: true,         // Make it unlit so it's always visible regardless of lighting
+                ..default()
+            });
+            
             // Spawn the mesh entity
             let mesh_handle = meshes.add(mesh);
             let entity = commands.spawn(PbrBundle {
                 mesh: mesh_handle,
-                material: triangle_material.clone(),
+                material: triangle_material,
                 ..default()
             }).id();
             
@@ -992,11 +1045,6 @@ fn draw_bones(
     _settings: Res<VisualizationSettings>,
 ) {
     if let Some(mesh_data) = mesh_data {
-        // Debug print for draw_bones function
-        println!("*** DRAWING BONES AND SKIN VERTICES ***");
-        println!("Number of bones to draw: {}", mesh_data.positions.len());
-        println!("Number of skin vertices to draw: {}", mesh_data.skin_vertex_positions.len());
-        
         // Draw bones
         for bone in mesh_data.positions.values() {
             // Draw bone using pre-transformed positions
@@ -1008,10 +1056,7 @@ fn draw_bones(
         }
         
         // Draw skin vertices as spheres
-        println!("DRAWING: About to draw {} skin vertices", mesh_data.skin_vertex_positions.len());
-        for (i, (position, color, _)) in mesh_data.skin_vertex_positions.iter().enumerate() {
-            println!("DRAWING: Drawing skin vertex {} at position {:?}", i, position);
-            
+        for (i, (position, color, _, _)) in mesh_data.skin_vertex_positions.iter().enumerate() {
             // Draw a sphere at the vertex position
             let sphere_radius = 0.005; // Size of the sphere (reduced to 10% of original 0.05)
             gizmos.sphere(
@@ -1035,18 +1080,13 @@ fn draw_triangles(
     }
     
     if let Some(mesh_data) = mesh_data {
-        // Debug print details about triangles
-        println!("DRAWING: Triangle positions map has {} triangles", mesh_data.triangles.len());
-        
         // Draw triangle outlines only - the mesh system handles the filling
-        for (name, vertices) in &mesh_data.triangles {
-            println!("DRAWING: Drawing triangle outline '{}'", name);
-            
+        for (i, (name, vertices)) in mesh_data.triangles.iter().enumerate() {
             // Draw the triangle outline only
-            let outline_color = Color::rgb(0.2, 0.8, 0.2);
-            gizmos.line(vertices[0], vertices[1], outline_color);
-            gizmos.line(vertices[1], vertices[2], outline_color);
-            gizmos.line(vertices[2], vertices[0], outline_color);
+            let color = mesh_data.skin_vertex_colors.get(i).unwrap_or(&[0.5, 0.5, 0.5, 0.5]); // Default to gray if no color
+            gizmos.line(vertices[0], vertices[1], Color::rgba(color[0], color[1], color[2], color[3]));
+            gizmos.line(vertices[1], vertices[2], Color::rgba(color[0], color[1], color[2], color[3]));
+            gizmos.line(vertices[2], vertices[0], Color::rgba(color[0], color[1], color[2], color[3]));
         }
     }
 }
@@ -1148,7 +1188,7 @@ fn update_ui(
         
         // Draw skin vertex labels using the same approach
         let skin_vertex_label_data: Vec<_> = mesh_data.skin_vertex_positions.iter()
-            .filter_map(|(position, _, id)| {
+            .filter_map(|(position, _, id, _)| {
                 // Only show labels for vertices that have an ID
                 let id = id.as_ref()?;
                 // Extract just the last part of the ID (after the last dot)
@@ -1186,15 +1226,15 @@ fn export_to_glb(mesh_data: &MeshData, export_path: &Path) -> Result<(), Box<dyn
     
     // Add vertices
     let _positions_view_offset = 0;
-    for (position, _, _) in &mesh_data.skin_vertex_positions {
+    for (position, _, _, _) in &mesh_data.skin_vertex_positions {
         buffer_data.extend_from_slice(bytemuck::cast_slice(&[position.x, position.y, position.z]));
     }
     let positions_view_length = buffer_data.len();
     
     // Add vertex colors
     let colors_view_offset = buffer_data.len();
-    for (_, color, _) in &mesh_data.skin_vertex_positions {
-        buffer_data.extend_from_slice(bytemuck::cast_slice(&[color[0], color[1], color[2], 1.0f32]));
+    for (_, _, _, color) in &mesh_data.skin_vertex_positions {
+        buffer_data.extend_from_slice(bytemuck::cast_slice(&[color[0], color[1], color[2], color[3]]));
     }
     let colors_view_length = buffer_data.len() - colors_view_offset;
     
@@ -1203,7 +1243,7 @@ fn export_to_glb(mesh_data: &MeshData, export_path: &Path) -> Result<(), Box<dyn
     
     // Create a mapping of vertex positions to their indices
     let mut vertex_to_index = HashMap::new();
-    for (i, (pos, _, _)) in mesh_data.skin_vertex_positions.iter().enumerate() {
+    for (i, (pos, _, _, _)) in mesh_data.skin_vertex_positions.iter().enumerate() {
         // Use rounded values for position to handle float comparison issues
         let key = format!("{:.6},{:.6},{:.6}", pos.x, pos.y, pos.z);
         vertex_to_index.insert(key, i as u16);
