@@ -91,7 +91,7 @@ lf3 = { segment_length = 0.5, distance = 0.3, rotation = 180, color = [0.5,0.5,0
 lf4 = { segment_length = 0.5, distance = 0.3, rotation = 270, color = [0.5,0.5,0.5,0.5] }
 
 [body.right_pelvis]
-length = 0.3
+length = 0.1
 orientation = -100
 slope = 30
 rotation = 0
