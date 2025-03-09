@@ -170,10 +170,12 @@ impl Default for BonePosition {
 
 fn calculate_direction(orientation: f32, slope: f32) -> Vec3 {
     // For vertical slopes (±90°), use the raw slope value
-    if (slope - 90.0).abs() < 0.001 || (slope + 90.0).abs() < 0.001 {
-        // Convert slope to unit direction: +90° -> +1, -90° -> -1
-        let y = if slope > 0.0 { 1.0 } else { -1.0 };
-        Vec3::new(0.0, y, 0.0)
+    if (slope - 90.0).abs() < 0.001 {
+        // +90° points up
+        return Vec3::new(0.0, 1.0, 0.0);
+    } else if (slope + 90.0).abs() < 0.001 {
+        // -90° points down
+        return Vec3::new(0.0, -1.0, 0.0);
     } else {
         // For non-vertical slopes, use spherical coordinates
         let orientation_rad = orientation.to_radians();

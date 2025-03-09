@@ -151,10 +151,10 @@ fn calculate_transform(orientation: f32, slope: f32, rotation: f32) -> Mat4 {
     // For vertical slopes (±90°), use the raw slope value
     if (slope - 90.0).abs() < 0.001 {
         // For slope = 90° (pointing up), create a transform that points directly up
-        return Mat4::from_rotation_y(orientation_rad) * Mat4::from_rotation_x(std::f32::consts::PI/2.0) * Mat4::from_rotation_z(rotation_rad);
+        return Mat4::from_rotation_y(orientation_rad) * Mat4::from_rotation_x(-PI/2.0) * Mat4::from_rotation_z(rotation_rad);
     } else if (slope + 90.0).abs() < 0.001 {
         // For slope = -90° (pointing down), create a transform that points directly down
-        return Mat4::from_rotation_y(orientation_rad) * Mat4::from_rotation_x(-std::f32::consts::PI/2.0) * Mat4::from_rotation_z(rotation_rad);
+        return Mat4::from_rotation_y(orientation_rad) * Mat4::from_rotation_x(PI/2.0) * Mat4::from_rotation_z(rotation_rad);
     } else {
         // For non-vertical slopes, create a transform that:
         // 1. Points along +Z at 0 orientation

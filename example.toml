@@ -3,7 +3,7 @@
 [body.lower_spine]
 length = 0.20
 orientation = 0
-slope = -90
+slope = 90
 rotation = 0
 
 [body.lower_spine.skin_verts]
