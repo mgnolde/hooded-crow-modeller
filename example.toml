@@ -81,7 +81,7 @@ orientation = 0
 
 [body.left_pelvis.left_upper_leg.left_lower_leg.left_foot]
 length = 0.3
-slope = -45
+slope = -25
 orientation = -90
 
 [body.left_pelvis.left_upper_leg.left_lower_leg.left_foot.skin_verts]
@@ -97,15 +97,16 @@ slope = 30
 rotation = 0
 
 [body.right_pelvis.right_upper_leg]
-length = 0.5
+slope = 50
+length = 0.3
 
 [body.right_pelvis.right_upper_leg.right_lower_leg]
 length = 0.5
 
 [body.right_pelvis.right_upper_leg.right_lower_leg.right_foot]
 length = 0.3
-slope = -45
-orientation = -90
+slope = 45
+orientation = 135
 
 [body.right_pelvis.right_upper_leg.right_lower_leg.right_foot.skin_verts]
 rf1 = { segment_length = 0.5, distance = 0.3, rotation = 0, color = [0.5,0.5,0.5,0.5] }

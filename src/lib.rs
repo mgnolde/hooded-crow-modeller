@@ -121,13 +121,18 @@ impl Bone {
     }
     
     pub fn resolve_values(&mut self, parent: Option<&Bone>) {
-        // If no parent or value is explicitly specified, use default
+        // For orientation, add to parent's value if present (relative orientation)
         self.resolved_orientation = match (self.orientation, parent) {
-            (Some(val), _) => val,                                 // Use explicitly set value
-            (None, Some(parent)) => parent.resolved_orientation,   // Inherit from parent
-            (None, None) => 0.0,                                  // Default value
+            (Some(val), Some(parent)) => {
+                // Convert to radians, add, then convert back to degrees
+                (parent.resolved_orientation.to_radians() + val.to_radians()).to_degrees()
+            },
+            (Some(val), None) => val,                                      // Root bone uses absolute value
+            (None, Some(parent)) => parent.resolved_orientation,           // Inherit from parent
+            (None, None) => 0.0,                                          // Default value
         };
         
+        // Slope and rotation are absolute values
         self.resolved_slope = match (self.slope, parent) {
             (Some(val), _) => val,
             (None, Some(parent)) => parent.resolved_slope,

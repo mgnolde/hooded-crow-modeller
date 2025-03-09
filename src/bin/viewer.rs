@@ -142,18 +142,28 @@ fn hash_content(content: &str) -> u64 {
 
 fn calculate_transform(orientation: f32, slope: f32, rotation: f32) -> Mat4 {
     // Convert angles to radians
-    // This is now using the resolved orientation value from the bone
     let orientation_rad = orientation.to_radians();
     let slope_rad = slope.to_radians();
     let rotation_rad = rotation.to_radians();
 
-    // Create rotation matrices
-    let orientation_rot = Mat4::from_rotation_y(orientation_rad);
-    let slope_rot = Mat4::from_rotation_x(slope_rad);
-    let rotation_rot = Mat4::from_rotation_z(rotation_rad);
-
-    // Combine transformations in order: first orientation, then slope, then rotation
-    orientation_rot * slope_rot * rotation_rot
+    // For vertical slopes (±90°), use the raw slope value
+    if (slope - 90.0).abs() < 0.001 || (slope + 90.0).abs() < 0.001 {
+        // Convert slope to unit direction: +90° -> +1, -90° -> -1
+        let y = if slope > 0.0 { 1.0 } else { -1.0 };
+        // For vertical bones, orientation determines the rotation around the vertical axis
+        Mat4::from_rotation_y(orientation_rad) * Mat4::from_translation(Vec3::new(0.0, y, 0.0))
+    } else {
+        // For non-vertical slopes, create a transform that:
+        // 1. Points along +Z at 0 orientation
+        // 2. Rotates by orientation around Y (positive = towards +X)
+        // 3. Tilts up/down by slope around the local X axis
+        // 4. Applies final rotation around the bone's axis
+        let slope_rot = Mat4::from_rotation_x(slope_rad);
+        let orientation_rot = Mat4::from_rotation_y(orientation_rad);
+        let rotation_rot = Mat4::from_rotation_z(rotation_rad);
+        
+        orientation_rot * slope_rot * rotation_rot
+    }
 }
 
 fn process_bone_group(
