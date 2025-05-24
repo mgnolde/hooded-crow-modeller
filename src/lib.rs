@@ -17,14 +17,15 @@ pub struct Group {
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Bone {
+    #[serde(alias = "len")]
     pub length: f32,
-    #[serde(default)]
+    #[serde(default, alias = "orient")]
     pub orientation: Option<f32>,
     #[serde(default)]
     pub slope: Option<f32>,
-    #[serde(default)]
+    #[serde(default, alias = "rot")]
     pub rotation: Option<f32>,
-    #[serde(default)]
+    #[serde(default, alias = "col")]
     pub color: Option<[f32; 4]>,
     #[serde(default)]
     pub skin_verts: Vec<SkinVert>,
@@ -47,19 +48,19 @@ pub struct TriangleRef {
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct SkinVert {
-    #[serde(default)]
+    #[serde(default, alias = "len")]
     pub segment_length: f32,  // Position along the bone
-    #[serde(default)]
+    #[serde(default, alias = "dist")]
     pub distance: f32,        // Distance from the bone
-    #[serde(default)]
+    #[serde(default, alias = "rot")]
     pub rotation: f32,  // Rotation around the bone in degrees
     #[serde(default = "default_weight")]
     pub weight: f32,          // Weight of influence
     #[serde(default)]
     pub id: Option<String>,   // Optional identifier for the skin vertex
-    #[serde(default)]
+    #[serde(default, alias = "tri")]
     pub triangles: HashMap<String, usize>, // Triangle references: face_name -> vertex position
-    #[serde(default)]
+    #[serde(default, alias = "col")]
     pub color: Option<[f32; 4]>, // Color for this vertex
 }
 
@@ -212,24 +213,34 @@ impl Model {
                 if let Some(skin_verts_array) = skin_verts_value.as_array() {
                     let result: Vec<SkinVert> = skin_verts_array.iter().map(|v| {
                         let mut skin_vert = SkinVert::default();
-                        if let Some(segment_length) = v.get("segment_length").and_then(|v| v.as_float()) {
+                        // Check for both long and short field names
+                        if let Some(segment_length) = v.get("segment_length")
+                            .or_else(|| v.get("len"))
+                            .and_then(|v| v.as_float()) {
                             skin_vert.segment_length = segment_length as f32;
                         }
-                        if let Some(distance) = v.get("distance").and_then(|v| v.as_float()) {
+                        if let Some(distance) = v.get("distance")
+                            .or_else(|| v.get("dist"))
+                            .and_then(|v| v.as_float()) {
                             skin_vert.distance = distance as f32;
                         }
-                        if let Some(rotation) = v.get("rotation").and_then(|v| v.as_float()) {
+                        if let Some(rotation) = v.get("rotation")
+                            .or_else(|| v.get("rot"))
+                            .and_then(|v| v.as_float()) {
                             skin_vert.rotation = rotation as f32;
                         }
-                        if let Some(weight) = v.get("weight").and_then(|v| v.as_float()) {
+                        if let Some(weight) = v.get("weight")
+                            .and_then(|v| v.as_float()) {
                             skin_vert.weight = weight as f32;
                         }
                         if let Some(id) = v.get("id").and_then(|v| v.as_str()) {
                             skin_vert.id = Some(id.to_string());
                         }
                         
-                        // Parse triangle references
-                        if let Some(triangles) = v.get("triangles").and_then(|v| v.as_table()) {
+                        // Parse triangle references (check both triangles and tri)
+                        if let Some(triangles) = v.get("triangles")
+                            .or_else(|| v.get("tri"))
+                            .and_then(|v| v.as_table()) {
                             for (face_name, position) in triangles {
                                 if let Some(pos) = position.as_integer() {
                                     skin_vert.triangles.insert(face_name.clone(), pos as usize);
@@ -237,8 +248,10 @@ impl Model {
                             }
                         }
                         
-                        // Parse color
-                        if let Some(color) = v.get("color").and_then(|v| v.as_array()) {
+                        // Parse color (check both long and short field names)
+                        if let Some(color) = v.get("color")
+                            .or_else(|| v.get("col"))
+                            .and_then(|v| v.as_array()) {
                             skin_vert.color = Some([color[0].as_float().unwrap_or(1.0) as f32,
                                                     color[1].as_float().unwrap_or(1.0) as f32,
                                                     color[2].as_float().unwrap_or(1.0) as f32,
@@ -256,21 +269,31 @@ impl Model {
                         let mut skin_vert = SkinVert::default();
                         skin_vert.id = Some(id.to_string());
                         
-                        if let Some(segment_length) = props.get("segment_length").and_then(|v| v.as_float()) {
+                        // Check for both long and short field names
+                        if let Some(segment_length) = props.get("segment_length")
+                            .or_else(|| props.get("len"))
+                            .and_then(|v| v.as_float()) {
                             skin_vert.segment_length = segment_length as f32;
                         }
-                        if let Some(distance) = props.get("distance").and_then(|v| v.as_float()) {
+                        if let Some(distance) = props.get("distance")
+                            .or_else(|| props.get("dist"))
+                            .and_then(|v| v.as_float()) {
                             skin_vert.distance = distance as f32;
                         }
-                        if let Some(rotation) = props.get("rotation").and_then(|v| v.as_float()) {
+                        if let Some(rotation) = props.get("rotation")
+                            .or_else(|| props.get("rot"))
+                            .and_then(|v| v.as_float()) {
                             skin_vert.rotation = rotation as f32;
                         }
-                        if let Some(weight) = props.get("weight").and_then(|v| v.as_float()) {
+                        if let Some(weight) = props.get("weight")
+                            .and_then(|v| v.as_float()) {
                             skin_vert.weight = weight as f32;
                         }
                         
-                        // Parse triangle references
-                        if let Some(triangles) = props.get("triangles").and_then(|v| v.as_table()) {
+                        // Parse triangle references (check both triangles and tri)
+                        if let Some(triangles) = props.get("triangles")
+                            .or_else(|| props.get("tri"))
+                            .and_then(|v| v.as_table()) {
                             for (face_name, position) in triangles {
                                 if let Some(pos) = position.as_integer() {
                                     skin_vert.triangles.insert(face_name.clone(), pos as usize);
@@ -278,8 +301,10 @@ impl Model {
                             }
                         }
                         
-                        // Parse color
-                        if let Some(color) = props.get("color").and_then(|v| v.as_array()) {
+                        // Parse color (check both long and short field names)
+                        if let Some(color) = props.get("color")
+                            .or_else(|| props.get("col"))
+                            .and_then(|v| v.as_array()) {
                             skin_vert.color = Some([color[0].as_float().unwrap_or(1.0) as f32,
                                                     color[1].as_float().unwrap_or(1.0) as f32,
                                                     color[2].as_float().unwrap_or(1.0) as f32,
@@ -300,14 +325,18 @@ impl Model {
             current_path: &str, 
             bones: &mut HashMap<String, Group>
         ) -> Group {
+            println!("Collecting bones from path: {}", current_path);
             // Create current group
             let mut current_group = Group {
                 bones: HashMap::new(),
                 subgroups: HashMap::new(),
             };
             
+            // Check for both long and short field names
+            let has_length = table.contains_key("length") || table.contains_key("len");
+            
             // If this table has bone properties, add the bone to the current group
-            if table.contains_key("length") {
+            if has_length {
                 // Find parent bone to potentially inherit properties
                 let parent_bone = if current_path.contains('.') {
                     let parent_path = current_path.rsplit_once('.').unwrap().0;
@@ -316,28 +345,42 @@ impl Model {
                     None
                 };
                 
-                // Extract bone properties with inheritance
+                // Get length (required field)
+                let length = table.get("length")
+                    .or_else(|| table.get("len"))
+                    .and_then(|v| v.as_float())
+                    .unwrap_or(1.0) as f32;
+                
+                // Get optional fields, checking both long and short names
+                let orientation = table.get("orientation")
+                    .or_else(|| table.get("orient"))
+                    .and_then(|v| v.as_float().or_else(|| v.as_integer().map(|i| i as f64)))
+                    .map(|v| v as f32);
+                
+                let slope = table.get("slope")
+                    .and_then(|v| v.as_float().or_else(|| v.as_integer().map(|i| i as f64)))
+                    .map(|v| v as f32);
+                
+                let rotation = table.get("rotation")
+                    .or_else(|| table.get("rot"))
+                    .and_then(|v| v.as_float().or_else(|| v.as_integer().map(|i| i as f64)))
+                    .map(|v| v as f32);
+                
+                // Create the bone with the extracted values
                 let mut bone = Bone {
-                    length: table.get("length").and_then(|v| v.as_float()).unwrap_or(1.0) as f32,
-                    orientation: table.get("orientation")
-                        .and_then(|v| v.as_float().or_else(|| v.as_integer().map(|i| i as f64)))
-                        .map(|v| v as f32),
-                    slope: table.get("slope")
-                        .and_then(|v| v.as_float().or_else(|| v.as_integer().map(|i| i as f64)))
-                        .map(|v| v as f32),
-                    rotation: table.get("rotation")
-                        .and_then(|v| v.as_float().or_else(|| v.as_integer().map(|i| i as f64)))
-                        .map(|v| v as f32),
-                    color: table.get("color").and_then(|v| v.as_array())
-                        .map(|color| [color[0].as_float().unwrap_or(1.0) as f32,
-                                      color[1].as_float().unwrap_or(1.0) as f32,
-                                      color[2].as_float().unwrap_or(1.0) as f32,
-                                      color.get(3).and_then(|c| c.as_float()).unwrap_or(1.0) as f32]),
+                    length,
+                    orientation,
+                    slope,
+                    rotation,
+                    color: None,
                     skin_verts: parse_skin_verts(table),
                     resolved_orientation: 0.0,
                     resolved_slope: 0.0,
                     resolved_rotation: 0.0,
                 };
+                
+                println!("Created bone at {}: length={}, orientation={:?}, rotation={:?}", 
+                    current_path, length, orientation, rotation);
                 
                 // Resolve inherited values
                 bone.resolve_values(parent_bone);
@@ -346,12 +389,13 @@ impl Model {
                 if let Some(skin_verts_value) = table.get("skin_verts") {
                     if let Some(skin_verts_array) = skin_verts_value.as_array() {
                         for skin_vert in skin_verts_array {
-                            if let Some(color) = skin_vert.get("color").and_then(|v| v.as_array()) {
+                            if let Some(color) = skin_vert.get("color")
+                                .or_else(|| skin_vert.get("col"))
+                                .and_then(|v| v.as_array()) {
                                 let extracted_color = [color[0].as_float().unwrap_or(1.0) as f32,
                                                        color[1].as_float().unwrap_or(1.0) as f32,
                                                        color[2].as_float().unwrap_or(1.0) as f32,
                                                        color.get(3).and_then(|c| c.as_float()).unwrap_or(1.0) as f32];
-                                println!("Extracted color for bone {}: {:?}", current_path, extracted_color);
                                 bone.color = Some(extracted_color);
                             }
                         }
@@ -364,8 +408,13 @@ impl Model {
             // Process nested tables as subgroups
             for (key, value) in table {
                 if let Some(nested_table) = value.as_table() {
-                    // Skip keys that are bone properties
-                    if key == "length" || key == "orientation" || key == "slope" || key == "rotation" || key == "skin_verts" || key == "color" {
+                    // Skip keys that are bone properties (both long and short forms)
+                    if key == "length" || key == "len" || 
+                       key == "orientation" || key == "orient" || 
+                       key == "slope" || 
+                       key == "rotation" || key == "rot" || 
+                       key == "skin_verts" || 
+                       key == "color" || key == "col" {
                         continue;
                     }
                     

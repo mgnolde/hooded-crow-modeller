@@ -1,116 +1,116 @@
 [body]
 
 [body.lower_spine]
-length = 0.20
-orientation = 0
+len = 0.20
+orient = 0
 slope = 90
-rotation = 0
+rot = 0
 
 [body.lower_spine.skin_verts]
 # Triangle vertices with clearer positions
-ls1 = { segment_length = 0.5, distance = 0.3, rotation = 0, triangles = { f1 = 0 }, color = [0.0,0.0,1.0,0.5] }
-ls2 = { segment_length = 0.3, distance = 0.6, rotation = 90, triangles = { f1 = 1 }, color = [0.0,0.0,1.0,0.5] }
-ls3 = { segment_length = 0.6, distance = 0.4, rotation = 180, triangles = { f1 = 2 }, color = [0.0,0.0,1.0,0.5] }
-ls4 = { segment_length = 0.5, distance = 0.3, rotation = 270, color = [0.0,0.0,1.0,0.5] }
+ls1 = { len = 0.5, dist = 0.3, rot = 0, triangles = { f1 = 0 }, col = [0.0,0.0,1.0,0.5] }
+ls2 = { len = 0.3, dist = 0.6, rot = 90, triangles = { f1 = 1 }, col = [0.0,0.0,1.0,0.5] }
+ls3 = { len = 0.6, dist = 0.4, rot = 180, triangles = { f1 = 2 }, col = [0.0,0.0,1.0,0.5] }
+ls4 = { len = 0.5, dist = 0.3, rot = 270, col = [0.0,0.0,1.0,0.5] }
 
 [body.lower_spine.middle_spine]
-length = 0.18
+len = 0.18
 
 [body.lower_spine.middle_spine.skin_verts]
-ms1 = { segment_length = 0.2, distance = 0.3, rotation = 45, color = [0.5,0.5,0.5,0.5] }
-ms2 = { segment_length = 0.4, distance = 0.3, rotation = 45, color = [0.5,0.5,0.5,0.5] }
-ms3 = { segment_length = 0.6, distance = 0.3, rotation = 45, color = [0.5,0.5,0.5,0.5] }
-ms4 = { segment_length = 0.8, distance = 0.3, rotation = 45, color = [0.5,0.5,0.5,0.5] }
+ms1 = { len = 0.2, dist = 0.3, rot = 45, col = [0.5,0.5,0.5,0.5] }
+ms2 = { len = 0.4, dist = 0.3, rot = 45, col = [0.5,0.5,0.5,0.5] }
+ms3 = { len = 0.6, dist = 0.3, rot = 45, col = [0.5,0.5,0.5,0.5] }
+ms4 = { len = 0.8, dist = 0.3, rot = 45, col = [0.5,0.5,0.5,0.5] }
 
 [body.lower_spine.middle_spine.upper_spine]
-length = 0.15
+len = 0.15
 
 [body.lower_spine.middle_spine.upper_spine.left_upper_arm]
-length = 0.3
-orientation = 100
+len = 0.3
+orient = 100
 slope = 20
-rotation = 0
+rot = 0
 
 [body.lower_spine.middle_spine.upper_spine.left_upper_arm.skin_verts]
-ua1 = { segment_length = 0.25, distance = 0.3, rotation = 0, color = [0.5,0.5,0.5,0.5] }
-ua2 = { segment_length = 0.5, distance = 0.3, rotation = 0, color = [0.5,0.5,0.5,0.5] }
-ua3 = { segment_length = 0.75, distance = 0.3, rotation = 0, color = [0.5,0.5,0.5,0.5] }
+ua1 = { len = 0.25, dist = 0.3, rot = 0, col = [0.5,0.5,0.5,0.5] }
+ua2 = { len = 0.5, dist = 0.3, rot = 0, col = [0.5,0.5,0.5,0.5] }
+ua3 = { len = 0.75, dist = 0.3, rot = 0, col = [0.5,0.5,0.5,0.5] }
 
 [body.lower_spine.middle_spine.upper_spine.left_upper_arm.left_lower_arm]
-length = 0.3
+len = 0.3
 
 [body.lower_spine.middle_spine.upper_spine.left_upper_arm.left_lower_arm.left_hand]
-length = 0.1
+len = 0.1
 
 [body.lower_spine.middle_spine.upper_spine.right_upper_arm]
-length = 0.3
-orientation = -100
+len = 0.3
+orient = -100
 slope = 20
-rotation = 0
+rot = 0
 
 [body.lower_spine.middle_spine.upper_spine.right_upper_arm.right_lower_arm]
-length = 0.3
+len = 0.3
 
 [body.lower_spine.middle_spine.upper_spine.right_upper_arm.right_lower_arm.right_hand]
-length = 0.1
+len = 0.1
 
 [body.lower_spine.middle_spine.upper_spine.neck]
-length = 0.12
-  
+len = 0.12
+
 [body.lower_spine.middle_spine.upper_spine.neck.head]
-length = 0.25
+len = 0.25
 
 [body.lower_spine.middle_spine.upper_spine.neck.head.skin_verts]
-n1 = { segment_length = 0.5, distance = 0.3, rotation = 0, color = [0.5,0.5,0.5,0.5] }
-n2 = { segment_length = 0.5, distance = 0.3, rotation = 90, color = [0.5,0.5,0.5,0.5] }
-n3 = { segment_length = 0.5, distance = 0.3, rotation = 180, color = [0.5,0.5,0.5,0.5] }
-n4 = { segment_length = 0.5, distance = 0.3, rotation = 270, color = [0.5,0.5,0.5,0.5] }
+n1 = { len = 0.5, dist = 0.3, rot = 0, col = [0.5,0.5,0.5,0.5] }
+n2 = { len = 0.5, dist = 0.3, rot = 90, col = [0.5,0.5,0.5,0.5] }
+n3 = { len = 0.5, dist = 0.3, rot = 180, col = [0.5,0.5,0.5,0.5] }
+n4 = { len = 0.5, dist = 0.3, rot = 270, col = [0.5,0.5,0.5,0.5] }
 
 [body.left_pelvis]
-length = 0.1
-orientation = 100
+len = 0.1
+orient = 100
 slope = -30
-rotation = 0
+rot = 0
 
 [body.left_pelvis.left_upper_leg]
 slope = -50
-length = 0.3
+len = 0.3
 
 [body.left_pelvis.left_upper_leg.left_lower_leg]
-length = 0.5
-orientation = 0
+len = 0.5
+orient = 0
 
 [body.left_pelvis.left_upper_leg.left_lower_leg.left_foot]
-length = 0.3
+len = 0.3
 slope = 45
-orientation = 45
+orient = 45
 
 [body.left_pelvis.left_upper_leg.left_lower_leg.left_foot.skin_verts]
-lf1 = { segment_length = 0.5, distance = 0.3, rotation = 0, color = [0.5,0.5,0.5,0.5] }
-lf2 = { segment_length = 0.5, distance = 0.3, rotation = 90, color = [0.5,0.5,0.5,0.5] }
-lf3 = { segment_length = 0.5, distance = 0.3, rotation = 180, color = [0.5,0.5,0.5,0.5] }
-lf4 = { segment_length = 0.5, distance = 0.3, rotation = 270, color = [0.5,0.5,0.5,0.5] }
+lf1 = { len = 0.5, dist = 0.3, rot = 0, col = [0.5,0.5,0.5,0.5] }
+lf2 = { len = 0.5, dist = 0.3, rot = 90, col = [0.5,0.5,0.5,0.5] }
+lf3 = { len = 0.5, dist = 0.3, rot = 180, col = [0.5,0.5,0.5,0.5] }
+lf4 = { len = 0.5, dist = 0.3, rot = 270, col = [0.5,0.5,0.5,0.5] }
 
 [body.right_pelvis]
-length = 0.1
-orientation = -100
+len = 0.1
+orient = -100
 slope = -30
-rotation = 0
+rot = 0
 
 [body.right_pelvis.right_upper_leg]
 slope = -50
-length = 0.3
+len = 0.3
 
 [body.right_pelvis.right_upper_leg.right_lower_leg]
-length = 0.5
+len = 0.5
 
 [body.right_pelvis.right_upper_leg.right_lower_leg.right_foot]
-length = 0.3
+len = 0.3
 slope = 45
-orientation = -55
+orient = -55
 
 [body.right_pelvis.right_upper_leg.right_lower_leg.right_foot.skin_verts]
-rf1 = { segment_length = 0.5, distance = 0.3, rotation = 0, color = [0.5,0.5,0.5,0.5] }
-rf2 = { segment_length = 0.5, distance = 0.3, rotation = 90, color = [0.5,0.5,0.5,0.5] }
-rf3 = { segment_length = 0.5, distance = 0.3, rotation = 180, color = [0.5,0.5,0.5,0.5] }
-rf4 = { segment_length = 0.5, distance = 0.3, rotation = 270, color = [0.5,0.5,0.5,0.5] }
+rf1 = { len = 0.5, dist = 0.3, rot = 0, col = [0.5,0.5,0.5,0.5] }
+rf2 = { len = 0.5, dist = 0.3, rot = 90, col = [0.5,0.5,0.5,0.5] }
+rf3 = { len = 0.5, dist = 0.3, rot = 180, col = [0.5,0.5,0.5,0.5] }
+rf4 = { len = 0.5, dist = 0.3, rot = 270, col = [0.5,0.5,0.5,0.5] }
