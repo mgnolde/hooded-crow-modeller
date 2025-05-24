@@ -67,13 +67,14 @@ n3 = { segment_length = 0.5, distance = 0.3, rotation = 180, color = [0.5,0.5,0.
 n4 = { segment_length = 0.5, distance = 0.3, rotation = 270, color = [0.5,0.5,0.5,0.5] }
 
 [body.left_pelvis]
-length = 0.3
+length = 0.1
 orientation = 100
-slope = -20
+slope = -30
 rotation = 0
 
 [body.left_pelvis.left_upper_leg]
-length = 0.5
+slope = -50
+length = 0.3
 
 [body.left_pelvis.left_upper_leg.left_lower_leg]
 length = 0.5
@@ -81,8 +82,8 @@ orientation = 0
 
 [body.left_pelvis.left_upper_leg.left_lower_leg.left_foot]
 length = 0.3
-slope = -25
-orientation = -90
+slope = 45
+orientation = 45
 
 [body.left_pelvis.left_upper_leg.left_lower_leg.left_foot.skin_verts]
 lf1 = { segment_length = 0.5, distance = 0.3, rotation = 0, color = [0.5,0.5,0.5,0.5] }
@@ -106,7 +107,7 @@ length = 0.5
 [body.right_pelvis.right_upper_leg.right_lower_leg.right_foot]
 length = 0.3
 slope = 45
-orientation = 135
+orientation = -55
 
 [body.right_pelvis.right_upper_leg.right_lower_leg.right_foot.skin_verts]
 rf1 = { segment_length = 0.5, distance = 0.3, rotation = 0, color = [0.5,0.5,0.5,0.5] }

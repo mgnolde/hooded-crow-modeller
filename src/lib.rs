@@ -178,8 +178,9 @@ fn calculate_direction(orientation: f32, slope: f32) -> Vec3 {
         return Vec3::new(0.0, -1.0, 0.0);
     } else {
         // For non-vertical slopes, use spherical coordinates
+        // Invert slope to match the calculate_transform function behavior
         let orientation_rad = orientation.to_radians();
-        let slope_rad = slope.to_radians();
+        let slope_rad = (-slope).to_radians(); // Invert sign so positive slopes point up
         Vec3::new(
             slope_rad.cos() * orientation_rad.sin(),
             slope_rad.sin(),
