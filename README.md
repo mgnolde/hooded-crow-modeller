@@ -41,3 +41,5 @@ run via:
 ```Bash
 cargo run --bin viewer example.toml
 ```
+
+The modeller supports hot-reloading, so the viewer window is updated as soon as the loaded file is edited (and saved).
