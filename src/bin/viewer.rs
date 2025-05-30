@@ -158,21 +158,24 @@ fn calculate_transform(orientation: f32, slope: f32, rotation: f32) -> Mat4 {
     // For vertical slopes (±90°), use the raw slope value
     if (slope - 90.0).abs() < 0.001 {
         // For slope = 90° (pointing up), create a transform that points directly up
-        return Mat4::from_rotation_y(orientation_rad) * Mat4::from_rotation_x(-PI/2.0) * Mat4::from_rotation_z(rotation_rad);
+        // Reordered: first orientation, then slope (vertical), then rotation
+        return Mat4::from_rotation_z(rotation_rad) * Mat4::from_rotation_x(-PI/2.0) * Mat4::from_rotation_y(orientation_rad);
     } else if (slope + 90.0).abs() < 0.001 {
         // For slope = -90° (pointing down), create a transform that points directly down
-        return Mat4::from_rotation_y(orientation_rad) * Mat4::from_rotation_x(PI/2.0) * Mat4::from_rotation_z(rotation_rad);
+        // Reordered: first orientation, then slope (vertical), then rotation
+        return Mat4::from_rotation_z(rotation_rad) * Mat4::from_rotation_x(PI/2.0) * Mat4::from_rotation_y(orientation_rad);
     } else {
         // For non-vertical slopes, create a transform that:
         // 1. Points along +Z at 0 orientation
-        // 2. Rotates by orientation around Y (positive = towards +X)
-        // 3. Tilts up/down by slope around the local X axis (INVERTED to match vertical case)
-        // 4. Applies final rotation around the bone's axis
-        let slope_rot = Mat4::from_rotation_x(-slope_rad); // Invert sign so positive slopes point up
+        // 2. Rotates by orientation around Y (positive = towards +X) - FIRST
+        // 3. Tilts up/down by slope around the local X axis - SECOND
+        // 4. Applies final rotation around the bone's axis - THIRD
         let orientation_rot = Mat4::from_rotation_y(orientation_rad);
+        let slope_rot = Mat4::from_rotation_x(-slope_rad); // Invert sign so positive slopes point up
         let rotation_rot = Mat4::from_rotation_z(rotation_rad);
         
-        orientation_rot * slope_rot * rotation_rot
+        // Apply transformations in logical order: orientation first, then slope, then rotation
+        rotation_rot * slope_rot * orientation_rot
     }
 }
 

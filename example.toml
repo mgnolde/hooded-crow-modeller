@@ -68,8 +68,8 @@ n4 = { len = 0.5, dist = 0.3, rot = 270, col = [0.5,0.5,0.5,0.5] }
 
 [body.left_pelvis]
 len = 0.1
-orient = 100
-slope = -30
+orient = 90
+slope = 0
 rot = 0
 
 [body.left_pelvis.left_upper_leg]
@@ -78,12 +78,11 @@ len = 0.3
 
 [body.left_pelvis.left_upper_leg.left_lower_leg]
 len = 0.5
-orient = 0
 
 [body.left_pelvis.left_upper_leg.left_lower_leg.left_foot]
 len = 0.3
-slope = 45
-orient = 45
+slope = 0
+orient = -55
 
 [body.left_pelvis.left_upper_leg.left_lower_leg.left_foot.skin_verts]
 lf1 = { len = 0.5, dist = 0.3, rot = 0, col = [0.5,0.5,0.5,0.5] }
@@ -93,8 +92,8 @@ lf4 = { len = 0.5, dist = 0.3, rot = 270, col = [0.5,0.5,0.5,0.5] }
 
 [body.right_pelvis]
 len = 0.1
-orient = -100
-slope = -30
+orient = -90
+slope = 0
 rot = 0
 
 [body.right_pelvis.right_upper_leg]
@@ -106,8 +105,9 @@ len = 0.5
 
 [body.right_pelvis.right_upper_leg.right_lower_leg.right_foot]
 len = 0.3
-slope = 45
-orient = -55
+slope = 90
+orient = 90
+rot = 0
 
 [body.right_pelvis.right_upper_leg.right_lower_leg.right_foot.skin_verts]
 rf1 = { len = 0.5, dist = 0.3, rot = 0, col = [0.5,0.5,0.5,0.5] }

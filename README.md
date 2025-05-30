@@ -1,6 +1,6 @@
 # Hooded Crow Modeller
 
-A command line 3D modeller, with a synchronized GUI component to visualize changes on the fly.
+A command line, low poly, parametric 3D modeller, with a synchronized GUI component to visualize changes on the fly.
 
 The modelling is done by defining a skeleton (consisting of bones and the joints between them). Basically, it's a directed graph with edge attributes, encoded in a TOML file. Attributes are inherited from the parent bone. Bones have skin vertices, defining the actual mesh. No animation is supported yet, altough the implementation is designed with this in mind. Everything is relative, no coordinates needed / supported.
 

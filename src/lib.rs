@@ -170,18 +170,31 @@ impl Default for BonePosition {
 }
 
 fn calculate_direction(orientation: f32, slope: f32) -> Vec3 {
-    // For vertical slopes (±90°), use the raw slope value
+    // Convert angles to radians
+    let orientation_rad = orientation.to_radians();
+    let slope_rad = (-slope).to_radians(); // Invert sign so positive slopes point up
+    
+    // For vertical slopes (±90°), now respect orientation
     if (slope - 90.0).abs() < 0.001 {
-        // +90° points up
-        return Vec3::new(0.0, 1.0, 0.0);
+        // +90° points up, but use orientation to determine direction in XZ plane
+        let upward = Vec3::new(0.0, 1.0, 0.0);
+        // Apply a slight tilt in the direction of orientation
+        return Vec3::new(
+            0.2 * orientation_rad.sin(), // Small X component based on orientation
+            0.98, // Mostly Y (up)
+            0.2 * orientation_rad.cos() // Small Z component based on orientation
+        ).normalize();
     } else if (slope + 90.0).abs() < 0.001 {
-        // -90° points down
-        return Vec3::new(0.0, -1.0, 0.0);
+        // -90° points down, but use orientation to determine direction in XZ plane
+        return Vec3::new(
+            0.2 * orientation_rad.sin(), // Small X component based on orientation
+            -0.98, // Mostly Y (down)
+            0.2 * orientation_rad.cos() // Small Z component based on orientation
+        ).normalize();
     } else {
         // For non-vertical slopes, use spherical coordinates
-        // Invert slope to match the calculate_transform function behavior
-        let orientation_rad = orientation.to_radians();
-        let slope_rad = (-slope).to_radians(); // Invert sign so positive slopes point up
+        // First apply orientation in XZ plane, then apply slope
+        // This matches the reordered calculate_transform function behavior
         Vec3::new(
             slope_rad.cos() * orientation_rad.sin(),
             slope_rad.sin(),
