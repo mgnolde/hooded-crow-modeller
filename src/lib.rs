@@ -66,6 +66,7 @@ pub struct SkinVert {
 
 impl Default for SkinVert {
     fn default() -> Self {
+        eprintln!("[SKINVERT DEBUG] SkinVert::default() called. Creating default SkinVert: seg_len=0.5, dist=0.0, rot=0.0");
         Self {
             segment_length: 0.5,  // Default to middle of the bone
             distance: 0.0,        // Default to on the bone
@@ -81,6 +82,8 @@ impl Default for SkinVert {
 impl SkinVert {
     /// Calculate the position of this skin vertex relative to the bone
     pub fn calculate_position(&self, bone_start: Vec3, bone_end: Vec3, bone_rotation: f32) -> Vec3 {
+        eprintln!("[SKINVERT DEBUG] CALC_POS for SV id: {:?}, seg_len: {}, dist: {}, sv_rot: {}", self.id, self.segment_length, self.distance, self.rotation);
+        eprintln!("[SKINVERT DEBUG]   CALC_POS inputs: bone_start: {:?}, bone_end: {:?}, bone_rotation (deg): {}", bone_start, bone_end, bone_rotation);
         // Calculate the direction of the bone
         let bone_direction = (bone_end - bone_start).normalize();
         let bone_length = (bone_end - bone_start).length();
@@ -110,9 +113,15 @@ impl SkinVert {
         // Calculate the offset from the bone in the perpendicular plane
         let offset = perp1 * self.distance * combined_angle_rad.cos() +
                      perp2 * self.distance * combined_angle_rad.sin();
-        
+        eprintln!("[SKINVERT DEBUG]   CALC_POS intermediates: bone_direction: {:?}, bone_length: {}", bone_direction, bone_length);
+        eprintln!("[SKINVERT DEBUG]   CALC_POS segment_position (on bone): {:?}", segment_position);
+        eprintln!("[SKINVERT DEBUG]   CALC_POS perp1: {:?}, perp2: {:?}", perp1, perp2);
+        eprintln!("[SKINVERT DEBUG]   CALC_POS combined_angle_rad: {:.4} (sv_rot {} + bone_rot {}) -> total_deg: {}", combined_angle_rad, self.rotation, bone_rotation, self.rotation + bone_rotation);
+        eprintln!("[SKINVERT DEBUG]   CALC_POS offset_vector: {:?}", offset);
+        let final_position = segment_position + offset;
+        eprintln!("[SKINVERT DEBUG]   CALC_POS final_position: {:?}", final_position);
         // Final position is the base position plus the offset
-        segment_position + offset
+        final_position
     }
 }
 
@@ -281,8 +290,8 @@ impl Model {
                     let result: Vec<SkinVert> = skin_verts_table.iter().map(|(id, props)| {
                         let mut skin_vert = SkinVert::default();
                         skin_vert.id = Some(id.to_string());
-                        
-                        // Check for both long and short field names
+
+                // Check for both long and short field names
                         if let Some(segment_length) = props.get("segment_length")
                             .or_else(|| props.get("len"))
                             .and_then(|v| v.as_float()) {
@@ -293,10 +302,24 @@ impl Model {
                             .and_then(|v| v.as_float()) {
                             skin_vert.distance = distance as f32;
                         }
-                        if let Some(rotation) = props.get("rotation")
-                            .or_else(|| props.get("rot"))
-                            .and_then(|v| v.as_float()) {
-                            skin_vert.rotation = rotation as f32;
+                        // Debugging rotation parsing
+                        let rot_val_long = props.get("rotation");
+                        let rot_val_short = props.get("rot");
+                        eprintln!("[SKINVERT DEBUG] PARSE_SKIN_VERTS (Table Format) - id={:?}: props.get(\"rotation\") is {:?}, props.get(\"rot\") is {:?}", skin_vert.id, rot_val_long, rot_val_short);
+
+                        if let Some(val) = rot_val_long.or(rot_val_short) {
+                            eprintln!("[SKINVERT DEBUG] PARSE_SKIN_VERTS (Table Format) - id={:?}: Found TOML value for rotation: {:?}", skin_vert.id, val);
+                            if let Some(rotation_float) = val.as_float() {
+                                eprintln!("[SKINVERT DEBUG] PARSE_SKIN_VERTS (Table Format) - id={:?}: Successfully parsed as float: {}", skin_vert.id, rotation_float);
+                                skin_vert.rotation = rotation_float as f32;
+                            } else if let Some(rotation_int) = val.as_integer() {
+                                eprintln!("[SKINVERT DEBUG] PARSE_SKIN_VERTS (Table Format) - id={:?}: Parsed as integer: {}, converting to f32", skin_vert.id, rotation_int);
+                                skin_vert.rotation = rotation_int as f32;
+                            } else {
+                                eprintln!("[SKINVERT DEBUG] PARSE_SKIN_VERTS (Table Format) - id={:?}: FAILED to parse TOML value {:?} as float or integer", skin_vert.id, val);
+                            }
+                        } else {
+                            eprintln!("[SKINVERT DEBUG] PARSE_SKIN_VERTS (Table Format) - id={:?}: NEITHER \"rotation\" NOR \"rot\" key found.", skin_vert.id);
                         }
                         if let Some(weight) = props.get("weight")
                             .and_then(|v| v.as_float()) {
@@ -323,6 +346,8 @@ impl Model {
                                                     color[2].as_float().unwrap_or(1.0) as f32,
                                                     color.get(3).and_then(|c| c.as_float()).unwrap_or(1.0) as f32]);
                         }
+                        eprintln!("[SKINVERT DEBUG] PARSE_SKIN_VERTS (Table Format) - Parsed SkinVert: id={:?}, len={}, dist={}, rot={}", 
+                                   skin_vert.id, skin_vert.segment_length, skin_vert.distance, skin_vert.rotation);
                         
                         skin_vert
                     }).collect();
