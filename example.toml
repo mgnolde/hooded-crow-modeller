@@ -8,10 +8,10 @@ rot = 0
 
 [body.lower_spine.skin_verts]
 # Triangle vertices with clearer positions
-ls1 = { len = 0.0, dist = 0.1, rot = 180, tri = { f1 = 0 }, col = [0.0,0.0,1.0,0.5] } # Test: rot = 0
-ls2 = { len = 0.0, dist = 0.15, rot = 240, tri = { f1 = 1, f2 = 1 }, col = [0.0,0.0,1.0,0.5] } # Test: rot = 90, should be 90deg from ls1
-ls3 = { len = 0.4, dist = 0.1, rot = 180, tri = { f1 = 2, f2 = 2 }, col = [0.0,0.0,1.0,0.5] }
-ls4 = { len = 0.4, dist = 0.15, rot = 240, tri = { f2 = 0 }, col = [0.0,0.0,1.0,0.5] }
+ls1 = { len = 0.0, dist = 0.1, rot = 180, triangles = { f1 = 0 }, col = [0.0,0.0,0.0,0.5] }
+ls2 = { len = 0.0, dist = 0.15, rot = 240, triangles = { f1 = 1, f2 = 0 }, col = [1.0,1.0,0.0,0.5] }
+ls3 = { len = 0.4, dist = 0.1, rot = 180, triangles = { f1 = 2, f2 = 1 }, col = [1.0,1.0,0.0,0.5] }
+ls4 = { len = 0.4, dist = 0.15, rot = 240, triangles = { f2 = 2 }, col = [1.0,1.0,0.0,0.5] }
 
 [body.lower_spine.middle_spine]
 len = 0.18

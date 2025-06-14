@@ -1035,16 +1035,31 @@ fn update_triangle_meshes(
             // Set indices
             mesh.insert_indices(Indices::U32(vec![0, 1, 2]));
             
-            // Assign color directly from skin vertex colors
-            let color = mesh_data.skin_vertex_colors.get(i).unwrap_or(&[0.5, 0.5, 0.5, 0.5]); // Default to gray if no color
+            // Get the color from the vertex colors in the TOML file
+            // We'll try to find the first matching vertex position in skin_vertex_positions
+            // and extract its color
+            let mut found_color = None;
             
-            // Directly assign blue color for triangle 'f1'
-            let color = if name == "f1" {
-                // Force blue color for the f1 triangle
-                [0.0, 0.0, 1.0, 0.5] 
+            // Look for vertex colors in the skin_vertex_positions
+            for (pos, _, id, col) in &mesh_data.skin_vertex_positions {
+                if pos == &vertices[0] || pos == &vertices[1] || pos == &vertices[2] {
+                    // We found a match, use its color
+                    found_color = Some(*col);
+                    println!("Found color {:?} from vertex with position {:?}, id {:?}", col, pos, id);
+                    break;
+                }
+            }
+            
+            // If we found a color from the TOML vertices, use it
+            // Otherwise use a default based on the triangle name
+            let color = if let Some(col) = found_color {
+                col
+            } else if name == "f1" || name == "f2" {
+                // Fallback for f1/f2 triangles
+                [0.0, 0.0, 1.0, 0.5]
             } else {
-                // For other triangles, use the color from the data
-                *color
+                // Default fallback for any other triangles
+                [0.5, 0.5, 0.5, 0.5]
             };
             
             // Print the color to debug
