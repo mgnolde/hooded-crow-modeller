@@ -7,20 +7,56 @@ slope = 90
 rot = 0
 
 [body.lower_spine.skin_verts]
-# Triangle vertices with clearer positions
-ls1 = { len = 0.0, dist = 0.1, rot = 180, triangles = { f1 = 0 }, col = [0.0,0.0,0.0,0.5] }
-ls2 = { len = 0.0, dist = 0.15, rot = 240, triangles = { f1 = 1, f2 = 0 }, col = [1.0,1.0,0.0,0.5] }
-ls3 = { len = 0.4, dist = 0.1, rot = 180, triangles = { f1 = 2, f2 = 1 }, col = [1.0,1.0,0.0,0.5] }
-ls4 = { len = 0.4, dist = 0.15, rot = 240, triangles = { f2 = 2 }, col = [1.0,1.0,0.0,0.5] }
+# Vertices with IDs but no triangle references
+ls1 = { len = 0.0, dist = 0.1, rot = 180, id = "ls1", col = [0.0,0.0,0.0,0.5] }
+ls2 = { len = 0.0, dist = 0.15, rot = 240, id = "ls2", col = [1.0,1.0,0.0,0.5] }
+ls3 = { len = 0.4, dist = 0.1, rot = 180, id = "ls3", col = [1.0,1.0,0.0,0.5] }
+ls4 = { len = 0.4, dist = 0.15, rot = 240, id = "ls4", col = [1.0,1.0,0.0,0.5] }
+
+# Triangle definitions referencing vertex IDs
+[body.lower_spine.triangles]
+f1 = { verts = ["ls1", "ls2", "ls3"], col = [0.0, 0.0, 0.0, 0.5] }
+f2 = { verts = ["ls2", "ls3", "ls4"], col = [1.0, 1.0, 0.0, 0.5] }
 
 [body.lower_spine.middle_spine]
 len = 0.18
 
+
+# SECTION 2: New triangle syntax (defining triangles separately)
+[body.right_arm]
+len = 0.30
+orient = 90
+slope = 0
+
+[body.right_arm.skin_verts]
+# New method: Triangle vertices with IDs but no triangle references
+v1 = { len = 0.0, dist = 0.05, rot = 0, id = "v1" }
+v2 = { len = 0.0, dist = 0.05, rot = 120, id = "v2" }
+v3 = { len = 0.0, dist = 0.05, rot = 240, id = "v3" }
+v4 = { len = 1.0, dist = 0.05, rot = 0, id = "v4" }
+v5 = { len = 1.0, dist = 0.05, rot = 120, id = "v5" }
+v6 = { len = 1.0, dist = 0.05, rot = 240, id = "v6" }
+
+# New method: Triangle definitions referencing vertex IDs
+[body.right_arm.triangles]
+tri1 = { verts = ["v1", "v2", "v4"], col = [1.0, 0.0, 0.0, 0.7] }
+tri2 = { verts = ["v2", "v5", "v4"], col = [0.0, 1.0, 0.0, 0.7] }
+tri3 = { verts = ["v2", "v3", "v5"], col = [0.0, 0.0, 1.0, 0.7] }
+tri4 = { verts = ["v3", "v6", "v5"], col = [1.0, 1.0, 0.0, 0.7] }
+tri5 = { verts = ["v3", "v1", "v6"], col = [1.0, 0.0, 1.0, 0.7] }
+tri6 = { verts = ["v1", "v4", "v6"], col = [0.0, 1.0, 1.0, 0.7] }
+
 [body.lower_spine.middle_spine.skin_verts]
-ms1 = { len = 0.2, dist = 0.3, rot = 45, col = [0.5,0.5,0.5,0.5] }
-ms2 = { len = 0.4, dist = 0.3, rot = 45, col = [0.5,0.5,0.5,0.5] }
-ms3 = { len = 0.6, dist = 0.3, rot = 45, col = [0.5,0.5,0.5,0.5] }
-ms4 = { len = 0.8, dist = 0.3, rot = 45, col = [0.5,0.5,0.5,0.5] }
+ms1 = { len = 0.2, dist = 0.3, rot = 45, id = "ms1", col = [0.5,0.5,0.5,0.5] }
+ms2 = { len = 0.4, dist = 0.3, rot = 45, id = "ms2", col = [0.5,0.5,0.5,0.5] }
+ms3 = { len = 0.6, dist = 0.3, rot = 45, id = "ms3", col = [0.5,0.5,0.5,0.5] }
+ms4 = { len = 0.8, dist = 0.3, rot = 45, id = "ms4", col = [0.5,0.5,0.5,0.5] }
+
+# Triangle definitions for middle_spine
+[body.lower_spine.middle_spine.triangles]
+
+spine_tri1 = { verts = ["ms1", "ms2", "ms3"], col = [0.5, 0.3, 0.7, 0.6] }
+spine_tri2 = { verts = ["ms2", "ms3", "ms4"], col = [0.3, 0.5, 0.7, 0.6] }
 
 [body.lower_spine.middle_spine.upper_spine]
 len = 0.15

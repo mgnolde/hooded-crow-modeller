@@ -80,10 +80,27 @@ enum TriangleOutlineMode {
 
 #[derive(Resource)]
 struct VisualizationSettings {
+    show_skin_vertices: bool,
+    show_triangles: bool,
+    show_mesh: bool,
     visualization_mode: BoneVisualization,
     line_width: f32,
-    show_triangles: bool,
     triangle_outline: TriangleOutlineMode,
+}
+
+impl Default for VisualizationSettings {
+    fn default() -> Self {
+        let settings = Self {
+            show_skin_vertices: true,
+            show_triangles: true, // Always show triangles by default for debugging
+            show_mesh: true,
+            visualization_mode: BoneVisualization::Solid,
+            line_width: 5.0,
+            triangle_outline: TriangleOutlineMode::Black,
+        };
+        println!("Created default visualization settings: show_triangles={}", settings.show_triangles);
+        settings
+    }
 }
 
 #[derive(Resource)]
@@ -413,6 +430,7 @@ fn handle_file_changes(
     for event in file_events.read() {
         let model = &event.model;
         println!("*** File changed! Reloading model... ***");
+        println!("*** EVENT DEBUG: About to process file change event ***");
         
         // Clean up existing lights
         for light in light_query.iter() {
@@ -448,6 +466,7 @@ fn handle_file_changes(
         let mut positions_with_colors: HashMap<String, (Vec3, Vec3, [f32; 3])> = HashMap::new();
         let mut skin_vertex_positions = Vec::new();
         let mut triangles: HashMap<String, [Vec3; 3]> = HashMap::new();
+        let mut triangle_colors: HashMap<String, [f32; 4]> = HashMap::new();
         let mut skin_vertex_colors = Vec::new();
         
         // Iterate through all bones in the model
@@ -493,8 +512,71 @@ fn handle_file_changes(
 
         println!("Loaded skin vertex colors from TOML: {:?}", skin_vertex_colors);
 
-        // Get triangles directly from calculated vertices rather than from model.collect_triangles()
+        // Create triangles directly from bone triangle definitions
+        println!("\n===== TRIANGLE COLLECTION DEBUGGING =====\n");
+        println!("TRIANGLE DEBUG: Creating triangles directly from bone definitions");
         
+        // Create a map of vertex IDs to positions for faster lookup
+        let vertex_id_map: HashMap<String, (Vec3, [f32; 4])> = skin_vertex_positions.iter()
+            .filter_map(|(pos, _, id, color)| {
+                id.as_ref().map(|id| (id.clone(), (*pos, *color)))
+            })
+            .collect();
+
+        println!("TRIANGLE DEBUG: Built vertex map with {} vertices", vertex_id_map.len());
+        for (id, (pos, _)) in &vertex_id_map {
+            println!("TRIANGLE DEBUG: Vertex '{}' at {:?}", id, pos);
+        }
+        
+        // Process triangles directly from bones
+        for (bone_name, bone) in &all_bones {
+            println!("TRIANGLE DEBUG: Processing bone '{}' with {} triangle_defs", bone_name, bone.triangle_defs.len());
+            
+            for (tri_name, tri_def) in &bone.triangle_defs {
+                println!("TRIANGLE DEBUG: Processing triangle '{}' with vertices: {:?}", tri_name, tri_def.verts);
+                
+                if tri_def.verts.len() == 3 {
+                    let mut triangle_verts = [Vec3::ZERO; 3];
+                    let mut all_found = true;
+                    
+                    for (i, vertex_id) in tri_def.verts.iter().enumerate() {
+                        if let Some((pos, _)) = vertex_id_map.get(vertex_id) {
+                            triangle_verts[i] = *pos;
+                            println!("TRIANGLE DEBUG: Found vertex '{}' at {:?}", vertex_id, pos);
+                        } else {
+                            println!("TRIANGLE DEBUG: ERROR: Vertex '{}' not found in vertex map", vertex_id);
+                            all_found = false;
+                            break;
+                        }
+                    }
+                    
+                    if all_found {
+                        let full_name = format!("{}.{}", bone_name, tri_name);
+                        triangles.insert(full_name.clone(), triangle_verts);
+                        triangle_colors.insert(full_name.clone(), tri_def.color.unwrap_or([0.7, 0.7, 0.7, 0.5]));
+                        println!("TRIANGLE DEBUG: Added triangle '{}' with vertices: {:?}", full_name, triangle_verts);
+                    }
+                }
+            }
+        }
+        
+        println!("TRIANGLE DEBUG: Added {} triangles to MeshData", triangles.len());
+        
+        // Print detailed debug info about triangles
+        for (tri_name, tri_vertices) in &triangles {
+            println!("TRIANGLE MESHDATA: '{}' has vertices: [{:?}, {:?}, {:?}]", 
+                tri_name, tri_vertices[0], tri_vertices[1], tri_vertices[2]);
+        }
+        
+        // Then try the old method (recalculating from vertices)
+        // Print the skin vertex positions and IDs that were loaded
+        println!("DEBUG: Loaded {} skin vertices with these IDs:", skin_vertex_positions.len());
+        for (i, (pos, _, id, color)) in skin_vertex_positions.iter().enumerate() {
+            if let Some(id) = id {
+                println!("  Vertex {}: ID='{}', pos={:?}", i, id, pos);
+            }
+        }
+
         // Create a map of vertex IDs to positions and colors for faster lookup
         let vertex_id_map: HashMap<String, (Vec3, [f32; 4])> = skin_vertex_positions.iter()
             .filter_map(|(pos, _, id, color)| {
@@ -510,9 +592,8 @@ fn handle_file_changes(
             })
             .collect();
 
-        // Get triangle definitions from the model
+        // Get triangle definitions from the model - only for debugging purposes
         let bones = model.get_bones();
-        let mut triangle_colors: HashMap<String, [f32; 4]> = HashMap::new();
         
         for (bone_name, bone) in &bones {
             for skin_vert in &bone.skin_verts {
@@ -534,7 +615,6 @@ fn handle_file_changes(
                                 triangle_verts[*position_in_triangle] = *position;
                                 
                                 // For all vertices, store the color for the triangle
-                                // This ensures we get the color from the TOML file
                                 triangle_colors.insert(face_name.clone(), *color);
                                 println!("Assigning color {:?} to triangle {}", *color, face_name);
                             }
@@ -542,6 +622,14 @@ fn handle_file_changes(
                     }
                 }
             }
+
+            // Print the vertex_id_map keys so we can verify what IDs are available
+            println!("DEBUG: vertex_id_map contains {} IDs: {:?}", vertex_id_map.len(), vertex_id_map.keys().collect::<Vec<_>>());
+            
+            // IMPORTANT: We no longer process triangles here since we now use model.collect_triangles() exclusively
+            // This avoids the duplicate triangle processing that was causing issues
+            println!("DEBUG: Bone {} has {} triangle definitions (which were already processed via model.collect_triangles())", 
+                     bone_name, bone.triangle_defs.len());
         }
 
         // Store triangle colors in skin_vertex_colors in the same order as triangles
@@ -591,6 +679,16 @@ fn handle_file_changes(
         mesh_data.skin_vertex_positions = skin_vertex_positions;
         mesh_data.triangles = triangles;
         mesh_data.skin_vertex_colors = skin_vertex_colors;
+        
+        println!("FINAL MESHDATA: {} triangles stored in MeshData", mesh_data.triangles.len());
+        for (name, verts) in &mesh_data.triangles {
+            println!("FINAL TRIANGLE: '{}' vertices: [{:?}, {:?}, {:?}]", name, verts[0], verts[1], verts[2]);
+        }
+        
+        println!("INITIAL TRIANGLES: {}", mesh_data.triangles.len());
+        for (name, verts) in &mesh_data.triangles {
+            println!("TRIANGLE in MeshData: {} - {:?}, {:?}, {:?}", name, verts[0], verts[1], verts[2]);
+        }
 
         // Set up camera
         camera_transform.translation = camera_position;
@@ -617,8 +715,12 @@ fn handle_file_changes(
             ..default()
         });
 
-        // Insert resources
-        commands.insert_resource(mesh_data);
+        // Debug print before inserting resources
+        println!("[RESOURCE INSERT] About to insert MeshData with {} triangles", mesh_data.triangles.len());
+        
+        // Insert resources with explicit debug
+        commands.insert_resource(mesh_data.clone());
+        println!("[RESOURCE INSERT] Inserted MeshData resource");
         commands.insert_resource(ShowAxes(true));
         // Get the current settings to preserve user preferences if available
         let triangle_outline = if let Some(settings) = settings.as_ref() {
@@ -631,6 +733,8 @@ fn handle_file_changes(
             visualization_mode: BoneVisualization::Solid,
             line_width: 5.0,
             show_triangles: true,
+            show_mesh: true,
+            show_skin_vertices: true,
             triangle_outline, // Use preserved or default setting
         });
         commands.insert_resource(ColorCache { colors: color_map.clone() });
@@ -705,9 +809,11 @@ fn setup(
     // Initialize resources
     commands.insert_resource(ShowAxes(true));
     commands.insert_resource(VisualizationSettings {
+        show_skin_vertices: true,
+        show_triangles: true,
+        show_mesh: true,
         visualization_mode: BoneVisualization::Solid,
         line_width: 5.0,
-        show_triangles: true,
         triangle_outline: TriangleOutlineMode::Black, // Default to black outlines
     });
     commands.insert_resource(TriangleMeshHandles::default());
@@ -732,21 +838,30 @@ fn setup(
 
     let all_bones = model.get_bones();
     for (full_path, bone) in &all_bones {
+        // println!("SETUP: Processing bone {} with {} skin verts", full_path, bone.skin_verts.len());
+        
+        // Store bone position and color
         if let Some((start, end)) = positions.get(full_path.as_str()) {
             let bone_depth = get_bone_depth(full_path.as_str());
             let color = get_rainbow_color(bone_depth, max_depth).0;
             positions_with_colors.insert(full_path.clone(), (*start, *end, color));
             
             for skin_vert in &bone.skin_verts {
+                // Calculate position of skin vertex using the bone's start and end
                 let position = skin_vert.calculate_position(*start, *end, bone.resolved_rotation);
+                
+                // Use the skin vertex's color if available, otherwise use bone's color or default
                 let color = skin_vert.color
                     .or_else(|| bone.color)
                     .unwrap_or_else(|| [0.5, 0.5, 0.5, 0.5]);
+                
+                // Store the vertex position and ID
                 let id = skin_vert.id.clone().unwrap_or_else(|| full_path.clone());
-                // Extract RGB components for correct vertex display
+                
+                // Extract RGB components for the vertex color (for rendering)
                 let rgb_color = [color[0], color[1], color[2]];
                 
-                // Use the actual RGB color instead of white
+                // Add skin vertex to our collection with the correct colors
                 skin_vertex_positions.push((position, rgb_color, Some(id.clone()), color));
                 skin_vertex_colors.push(color);
                 
@@ -776,7 +891,43 @@ fn setup(
         })
         .collect();
 
-    // Process triangles from the skin vertices
+    println!("[SETUP] TRIANGLE DEBUG: Built vertex map with {} vertices", vertex_id_map.len());
+    for (id, (pos, _)) in &vertex_id_map {
+        println!("[SETUP] TRIANGLE DEBUG: Vertex '{}' at {:?}", id, pos);
+    }
+    
+    // Process triangles directly from bones (same logic as file change handler)
+    for (bone_name, bone) in &all_bones {
+        println!("[SETUP] TRIANGLE DEBUG: Processing bone '{}' with {} triangle_defs", bone_name, bone.triangle_defs.len());
+        
+        for (tri_name, tri_def) in &bone.triangle_defs {
+            println!("[SETUP] TRIANGLE DEBUG: Processing triangle '{}' with vertices: {:?}", tri_name, tri_def.verts);
+            
+            if tri_def.verts.len() == 3 {
+                let mut triangle_verts = [Vec3::ZERO; 3];
+                let mut all_found = true;
+                
+                for (i, vertex_id) in tri_def.verts.iter().enumerate() {
+                    if let Some((pos, _)) = vertex_id_map.get(vertex_id) {
+                        triangle_verts[i] = *pos;
+                        println!("[SETUP] TRIANGLE DEBUG: Found vertex '{}' at {:?}", vertex_id, pos);
+                    } else {
+                        println!("[SETUP] TRIANGLE DEBUG: ERROR: Vertex '{}' not found in vertex map", vertex_id);
+                        all_found = false;
+                        break;
+                    }
+                }
+                
+                if all_found {
+                    let full_name = format!("{}.{}", bone_name, tri_name);
+                    triangles.insert(full_name.clone(), triangle_verts);
+                    println!("[SETUP] TRIANGLE DEBUG: Added triangle '{}' with vertices: {:?}", full_name, triangle_verts);
+                }
+            }
+        }
+    }
+
+    // Process triangles from the skin vertices (legacy method)
     let mut triangle_colors: HashMap<String, [f32; 4]> = HashMap::new();
     
     for (bone_name, bone) in &all_bones {
@@ -832,6 +983,11 @@ fn setup(
     mesh_data.skin_vertex_positions = skin_vertex_positions;
     mesh_data.triangles = triangles;
     mesh_data.skin_vertex_colors = skin_vertex_colors;
+
+    println!("[SETUP] FINAL MESHDATA: {} triangles stored in MeshData", mesh_data.triangles.len());
+    for (name, verts) in &mesh_data.triangles {
+        println!("[SETUP] FINAL TRIANGLE: '{}' vertices: [{:?}, {:?}, {:?}]", name, verts[0], verts[1], verts[2]);
+    }
 
     commands.insert_resource(mesh_data);
 }
@@ -923,10 +1079,64 @@ fn update_camera(
 fn keyboard_input(
     keyboard: Res<ButtonInput<KeyCode>>,
     mut show_axes: ResMut<ShowAxes>,
+    mut camera_query: Query<&mut Transform, With<Camera>>,
+    time: Res<Time>,
     _commands: Commands,
 ) {
     if keyboard.just_pressed(KeyCode::KeyG) {
         show_axes.0 = !show_axes.0;
+    }
+    
+    // Camera rotation with arrow keys and X/Y/Z keys
+    if let Ok(mut transform) = camera_query.get_single_mut() {
+        let rotation_speed = 1.0; // radians per second
+        let delta = time.delta_seconds();
+        let origin = Vec3::ZERO;
+        
+        // Store current distance from origin
+        let distance = (transform.translation - origin).length();
+        
+        // X-axis rotation (pitch) - Up/Down arrows
+        if keyboard.pressed(KeyCode::ArrowUp) {
+            let right: Vec3 = (*transform.right()).into();
+            let rotation = Quat::from_axis_angle(right, -rotation_speed * delta);
+            transform.rotate_around(origin, rotation);
+        }
+        if keyboard.pressed(KeyCode::ArrowDown) {
+            let right: Vec3 = (*transform.right()).into();
+            let rotation = Quat::from_axis_angle(right, rotation_speed * delta);
+            transform.rotate_around(origin, rotation);
+        }
+        
+        // Y-axis rotation (yaw) - Left/Right arrows
+        if keyboard.pressed(KeyCode::ArrowLeft) {
+            let rotation = Quat::from_rotation_y(rotation_speed * delta);
+            transform.rotate_around(origin, rotation);
+        }
+        if keyboard.pressed(KeyCode::ArrowRight) {
+            let rotation = Quat::from_rotation_y(-rotation_speed * delta);
+            transform.rotate_around(origin, rotation);
+        }
+        
+        // Z-axis rotation (roll) - X and Z keys
+        if keyboard.pressed(KeyCode::KeyX) {
+            let forward: Vec3 = (*transform.forward()).into();
+            let rotation = Quat::from_axis_angle(forward, rotation_speed * delta);
+            transform.rotate_around(origin, rotation);
+        }
+        if keyboard.pressed(KeyCode::KeyZ) {
+            let forward: Vec3 = (*transform.forward()).into();
+            let rotation = Quat::from_axis_angle(forward, -rotation_speed * delta);
+            transform.rotate_around(origin, rotation);
+        }
+        
+        // Maintain distance from origin after any rotation
+        if keyboard.pressed(KeyCode::ArrowUp) || keyboard.pressed(KeyCode::ArrowDown) ||
+           keyboard.pressed(KeyCode::ArrowLeft) || keyboard.pressed(KeyCode::ArrowRight) ||
+           keyboard.pressed(KeyCode::KeyX) || keyboard.pressed(KeyCode::KeyZ) {
+            let dir = (transform.translation - origin).normalize();
+            transform.translation = origin + dir * distance;
+        }
     }
 }
 
@@ -949,7 +1159,7 @@ fn mouse_motion(
                 
                 // Create rotation quaternions
                 let y_rotation = Quat::from_rotation_y(-delta_x);
-                let right: Vec3 = transform.right().into();
+                let right: Vec3 = (*transform.right()).into();
                 let x_rotation = Quat::from_axis_angle(right, -delta_y);
 
                 // Apply rotations around origin
@@ -983,13 +1193,33 @@ fn update_triangle_meshes(
     mesh_data: Option<Res<MeshData>>,
     settings: Res<VisualizationSettings>,
     mut triangle_handles: ResMut<TriangleMeshHandles>,
-    mut file_events: EventReader<FileChangedEvent>,
 ) {
-    // Check if we need to update
-    let should_update = !file_events.is_empty() || triangle_handles.handles.is_empty();
+    println!("[TRIANGLE SYSTEM] update_triangle_meshes called");
     
-    // Only update if we received a file change event or if there are no triangles yet
-    if !should_update {
+    // Check if mesh_data is available and triangles should be shown
+    let Some(mesh_data) = mesh_data else {
+        println!("[TRIANGLE SYSTEM] No mesh data available");
+        return;
+    };
+    
+    println!("[TRIANGLE SYSTEM] show_triangles: {}, triangles count: {}", settings.show_triangles, mesh_data.triangles.len());
+    
+    // Only update if there are triangles to show and the setting is enabled
+    if !settings.show_triangles || mesh_data.triangles.is_empty() {
+        println!("[TRIANGLE SYSTEM] Clearing triangles - show_triangles: {}, is_empty: {}", settings.show_triangles, mesh_data.triangles.is_empty());
+        // Clear existing triangle meshes if triangles are disabled
+        for entity in triangle_handles.handles.drain(..) {
+            commands.entity(entity).despawn();
+        }
+        return;
+    }
+
+    // Check if we need to update triangles (either no triangles exist or mesh data changed)
+    let needs_update = triangle_handles.handles.is_empty() || mesh_data.is_changed();
+    
+    println!("[TRIANGLE SYSTEM] needs_update: {}, handles_empty: {}, data_changed: {}", needs_update, triangle_handles.handles.is_empty(), mesh_data.is_changed());
+    
+    if !needs_update {
         return;
     }
 
@@ -998,18 +1228,24 @@ fn update_triangle_meshes(
         commands.entity(entity).despawn();
     }
 
-    // If we don't have mesh data or triangles aren't visible, return
-    if mesh_data.is_none() || !settings.show_triangles {
-        return;
+    println!("TRIANGLE DEBUG: MeshData contains {} triangles, {} skin vertices, {} positions", 
+             mesh_data.triangles.len(), mesh_data.skin_vertex_positions.len(), mesh_data.positions.len());
+                 
+    // Print the first few triangles for debugging
+    for (name, vertices) in mesh_data.triangles.iter().take(3) {
+        println!("TRIANGLE FOUND: '{}' with vertices at: [{:?}, {:?}, {:?}]", 
+                 name, vertices[0], vertices[1], vertices[2]);
     }
+    
+    println!("UPDATING: Creating {} triangle meshes", mesh_data.triangles.len());
 
-    if let Some(mesh_data) = mesh_data {
-        println!("UPDATING: Creating {} triangle meshes", mesh_data.triangles.len());
-
-        // Create a semi-transparent green material
-        for (i, (name, vertices)) in mesh_data.triangles.iter().enumerate() {
+    // Create triangle meshes
+    for (i, (name, vertices)) in mesh_data.triangles.iter().enumerate() {
             println!("MESH: Creating triangle mesh '{}'", name);
             
+            println!("[MESH CREATE] Creating mesh for triangle '{}' with vertices: {:?}, {:?}, {:?}", 
+                     name, vertices[0], vertices[1], vertices[2]);
+                     
             // Create a mesh for this triangle
             let mut mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default());
             
@@ -1085,15 +1321,16 @@ fn update_triangle_meshes(
             
             // Spawn the mesh entity
             let mesh_handle = meshes.add(mesh);
+            println!("[MESH SPAWN] About to spawn triangle '{}' with PbrBundle", name);
             let entity = commands.spawn(PbrBundle {
                 mesh: mesh_handle,
                 material: triangle_material,
                 ..default()
             }).id();
+            println!("[MESH SPAWN] Triangle '{}' spawned with entity ID {:?}", name, entity);
             
             // Store the entity handle for cleanup later
             triangle_handles.handles.push(entity);
-        }
     }
 }
 
@@ -1132,10 +1369,17 @@ fn draw_triangles(
     mesh_data: Option<Res<MeshData>>,
     settings: Res<VisualizationSettings>,
 ) {
-    // If we don't have the mesh data or triangles aren't visible, don't draw
-    if mesh_data.is_none() || !settings.show_triangles {
+    // Debug the triangle visibility settings
+    println!("[DRAW TRIANGLES] mesh_data.is_some()={}, settings.show_triangles={}", 
+             mesh_data.is_some(), settings.show_triangles);
+             
+    // For debugging purposes, always draw triangles regardless of settings
+    if mesh_data.is_none() {
+        println!("[DRAW TRIANGLES] No mesh data available - cannot draw triangles");
         return;
     }
+    
+    // Always draw triangles, ignoring settings.show_triangles for debugging
     
     if let Some(mesh_data) = mesh_data {
         // Draw triangle outlines only - the mesh system handles the filling
@@ -1652,9 +1896,9 @@ fn main() {
                 mouse_button_input,
                 update_camera,
                 export_system,
-                update_triangle_meshes,
             ).chain(),
         )
+        .add_systems(Update, update_triangle_meshes.after(handle_file_changes))
         // Make sure the UI system runs after EguiSet::InitContexts
         .add_systems(Update, update_ui.after(bevy_egui::EguiSet::InitContexts))
         .add_systems(PostUpdate, (draw_bones, draw_triangles, draw_axes))
