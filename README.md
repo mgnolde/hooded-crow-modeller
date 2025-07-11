@@ -20,9 +20,14 @@ slope = 90
 rot = 0
 
 [body.lower_spine.skin_verts]
-ls1 = { len = 0.5, dist = 0.3, rot = 0, tri = { f1 = 0 }, col = [0.0,0.0,1.0,0.5] }
-ls2 = { len = 0.3, dist = 0.6, rot = 90, tri = { f1 = 1 }, col = [0.0,0.0,1.0,0.5] }
-ls3 = { len = 0.6, dist = 0.4, rot = 180, tri = { f1 = 2 }, col = [0.0,0.0,1.0,0.5] }
+ls1 = { len = 0.0, dist = 0.1, rot = 180, col = [0.0,0.0,0.0,0.5] }
+ls2 = { len = 0.0, dist = 0.15, rot = 240, col = [1.0,1.0,0.0,0.5] }
+ls3 = { len = 0.4, dist = 0.1, rot = 180, col = [1.0,1.0,0.0,0.5] }
+ls4 = { len = 0.4, dist = 0.15, rot = 240, col = [1.0,1.0,0.0,0.5] }
+
+[body.lower_spine.triangles]
+f1 = { verts = ["ls1", "ls2", "ls3"], col = [0.0, 0.0, 0.0, 0.5] }
+f2 = { verts = ["ls2", "ls3", "ls4"], col = [1.0, 1.0, 0.0, 0.5] }
 
 [body.lower_spine.middle_spine]
 len = 0.18
