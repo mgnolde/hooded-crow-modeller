@@ -22,6 +22,42 @@ use std::{
     process,
 };
 use hooded_crow_modeller::{Model, Group};
+
+#[derive(Clone, Debug, PartialEq)]
+enum CameraMode {
+    Free,  // Free camera movement
+    Orbit, // Orbit around target
+}
+
+#[derive(Resource, Clone, Debug)]
+struct CameraState {
+    default_position: Vec3,
+    default_target: Vec3,
+    mode: CameraMode,
+}
+
+impl Default for CameraState {
+    fn default() -> Self {
+        Self {
+            default_position: Vec3::new(5.0, 5.0, 5.0),
+            default_target: Vec3::ZERO,
+            mode: CameraMode::Free,
+        }
+    }
+}
+
+#[derive(Resource, Clone, Debug)]
+struct ModelRotation {
+    rotation: Quat,
+}
+
+impl Default for ModelRotation {
+    fn default() -> Self {
+        Self {
+            rotation: Quat::IDENTITY,
+        }
+    }
+}
 use bevy_egui::{egui, EguiPlugin, EguiContexts};
 use gltf::json::{self, validation::{USize64, Checked}};
 use gltf::json::buffer::Stride;
@@ -43,7 +79,7 @@ struct MeshData {
     positions: HashMap<String, BonePosition>,
     transforms: HashMap<String, Mat4>,
     skin_vertex_positions: Vec<(Vec3, [f32; 3], Option<String>, [f32; 4])>, // Store skin vertex positions, colors and IDs
-    triangles: HashMap<String, [Vec3; 3]>, // Store triangles as (name, [vertex positions])
+    triangles: HashMap<String, ([Vec3; 3], [f32; 4])>, // Store triangles as (name, ([vertex positions], color))
     skin_vertex_colors: Vec<[f32; 4]>, // Store colors for skin vertices
 }
 
@@ -121,6 +157,10 @@ struct CameraController {
     zoom_sensitivity: f32,
     orbit_button: MouseButton,
     pan_button: MouseButton,
+    look_at_target: Vec3,
+    movement_speed: f32,
+    zoom_speed: f32,
+    rotation_speed: f32,
 }
 
 impl Default for CameraController {
@@ -131,6 +171,10 @@ impl Default for CameraController {
             zoom_sensitivity: 0.5,
             orbit_button: MouseButton::Left,
             pan_button: MouseButton::Right,
+            look_at_target: Vec3::ZERO,
+            movement_speed: 5.0,
+            zoom_speed: 2.0,
+            rotation_speed: 1.0,
         }
     }
 }
@@ -465,7 +509,7 @@ fn handle_file_changes(
         // Combine bone hierarchy with calculated positions
         let mut positions_with_colors: HashMap<String, (Vec3, Vec3, [f32; 3])> = HashMap::new();
         let mut skin_vertex_positions = Vec::new();
-        let mut triangles: HashMap<String, [Vec3; 3]> = HashMap::new();
+        let mut triangles: HashMap<String, ([Vec3; 3], [f32; 4])> = HashMap::new();
         let mut triangle_colors: HashMap<String, [f32; 4]> = HashMap::new();
         let mut skin_vertex_colors = Vec::new();
         
@@ -552,9 +596,10 @@ fn handle_file_changes(
                     
                     if all_found {
                         let full_name = format!("{}.{}", bone_name, tri_name);
-                        triangles.insert(full_name.clone(), triangle_verts);
-                        triangle_colors.insert(full_name.clone(), tri_def.color.unwrap_or([0.7, 0.7, 0.7, 0.5]));
-                        println!("TRIANGLE DEBUG: Added triangle '{}' with vertices: {:?}", full_name, triangle_verts);
+                        let triangle_color = tri_def.color.unwrap_or([0.7, 0.7, 0.7, 0.5]);
+                        triangles.insert(full_name.clone(), (triangle_verts, triangle_color));
+                        triangle_colors.insert(full_name.clone(), triangle_color);
+                        println!("TRIANGLE DEBUG: Added triangle '{}' with vertices: {:?}, color: {:?}", full_name, triangle_verts, triangle_color);
                     }
                 }
             }
@@ -563,9 +608,9 @@ fn handle_file_changes(
         println!("TRIANGLE DEBUG: Added {} triangles to MeshData", triangles.len());
         
         // Print detailed debug info about triangles
-        for (tri_name, tri_vertices) in &triangles {
-            println!("TRIANGLE MESHDATA: '{}' has vertices: [{:?}, {:?}, {:?}]", 
-                tri_name, tri_vertices[0], tri_vertices[1], tri_vertices[2]);
+        for (tri_name, (tri_vertices, color)) in &triangles {
+            println!("TRIANGLE MESHDATA: '{}' has vertices: [{:?}, {:?}, {:?}], color: {:?}", 
+                tri_name, tri_vertices[0], tri_vertices[1], tri_vertices[2], color);
         }
         
         // Then try the old method (recalculating from vertices)
@@ -604,17 +649,18 @@ fn handle_file_changes(
                     
                     // Create a face entry if it doesn't exist
                     if !triangles.contains_key(face_name) {
-                        triangles.insert(face_name.clone(), [Vec3::ZERO, Vec3::ZERO, Vec3::ZERO]);
+                        triangles.insert(face_name.clone(), ([Vec3::ZERO, Vec3::ZERO, Vec3::ZERO], [0.7, 0.7, 0.7, 0.5]));
                     }
                     
                     // Set the vertex position and color in the triangle
                     if let Some((position, color)) = vertex_id_map.get(&vertex_id) {
-                        if let Some(triangle_verts) = triangles.get_mut(face_name) {
+                        if let Some((triangle_verts, triangle_color)) = triangles.get_mut(face_name) {
                             // Update the vertex at its position in the triangle
                             if *position_in_triangle < 3 {
                                 triangle_verts[*position_in_triangle] = *position;
                                 
                                 // For all vertices, store the color for the triangle
+                                *triangle_color = *color;
                                 triangle_colors.insert(face_name.clone(), *color);
                                 println!("Assigning color {:?} to triangle {}", *color, face_name);
                             }
@@ -647,8 +693,8 @@ fn handle_file_changes(
         
         // Debug print what triangles we've collected
         println!("TRIANGLES:");
-        for (name, verts) in &triangles {
-            println!("Triangle {}: {:?}, {:?}, {:?}", name, verts[0], verts[1], verts[2]);
+        for (name, (verts, color)) in &triangles {
+            println!("Triangle {}: {:?}, {:?}, {:?}, color: {:?}", name, verts[0], verts[1], verts[2], color);
         }
 
         // Create the final MeshData with debug output
@@ -681,13 +727,13 @@ fn handle_file_changes(
         mesh_data.skin_vertex_colors = skin_vertex_colors;
         
         println!("FINAL MESHDATA: {} triangles stored in MeshData", mesh_data.triangles.len());
-        for (name, verts) in &mesh_data.triangles {
-            println!("FINAL TRIANGLE: '{}' vertices: [{:?}, {:?}, {:?}]", name, verts[0], verts[1], verts[2]);
+        for (name, (verts, color)) in &mesh_data.triangles {
+            println!("FINAL TRIANGLE: '{}' vertices: [{:?}, {:?}, {:?}], color: {:?}", name, verts[0], verts[1], verts[2], color);
         }
         
         println!("INITIAL TRIANGLES: {}", mesh_data.triangles.len());
-        for (name, verts) in &mesh_data.triangles {
-            println!("TRIANGLE in MeshData: {} - {:?}, {:?}, {:?}", name, verts[0], verts[1], verts[2]);
+        for (name, (verts, color)) in &mesh_data.triangles {
+            println!("TRIANGLE in MeshData: {} - {:?}, {:?}, {:?}, color: {:?}", name, verts[0], verts[1], verts[2], color);
         }
 
         // Set up camera
@@ -828,7 +874,7 @@ fn setup(
     // Process bones and create initial mesh data
     let mut positions_with_colors = HashMap::new();
     let mut skin_vertex_positions = Vec::new();
-    let mut triangles = HashMap::new();
+    let mut triangles: HashMap<String, ([Vec3; 3], [f32; 4])> = HashMap::new();
     let mut skin_vertex_colors = Vec::new();
 
     let max_depth = positions.keys()
@@ -920,8 +966,9 @@ fn setup(
                 
                 if all_found {
                     let full_name = format!("{}.{}", bone_name, tri_name);
-                    triangles.insert(full_name.clone(), triangle_verts);
-                    println!("[SETUP] TRIANGLE DEBUG: Added triangle '{}' with vertices: {:?}", full_name, triangle_verts);
+                    let triangle_color = tri_def.color.unwrap_or([0.7, 0.7, 0.7, 0.5]);
+                    triangles.insert(full_name.clone(), (triangle_verts, triangle_color));
+                    println!("[SETUP] TRIANGLE DEBUG: Added triangle '{}' with vertices: {:?}, color: {:?}", full_name, triangle_verts, triangle_color);
                 }
             }
         }
@@ -943,18 +990,19 @@ fn setup(
                 
                 // Create a face entry if it doesn't exist
                 if !triangles.contains_key(face_name) {
-                    triangles.insert(face_name.clone(), [Vec3::ZERO, Vec3::ZERO, Vec3::ZERO]);
+                    triangles.insert(face_name.clone(), ([Vec3::ZERO, Vec3::ZERO, Vec3::ZERO], [0.7, 0.7, 0.7, 0.5]));
                 }
                 
                 // Set the vertex position and color in the triangle
                 if let Some((position, color)) = vertex_id_map.get(&vertex_id) {
-                    if let Some(triangle_verts) = triangles.get_mut(face_name) {
+                    if let Some((triangle_verts, triangle_color)) = triangles.get_mut(face_name) {
                         // Update the vertex at its position in the triangle
                         if *position_in_triangle < 3 {
                             triangle_verts[*position_in_triangle] = *position;
                             
                             // If this is the first vertex (position 0), store its color for the whole triangle
                             if *position_in_triangle == 0 {
+                                *triangle_color = *color;
                                 triangle_colors.insert(face_name.clone(), *color);
                             }
                         }
@@ -965,19 +1013,15 @@ fn setup(
     }
 
     // Store triangle colors in skin_vertex_colors in the same order as triangles
-    for (name, vertices) in &triangles {
-        // Find the color of the first vertex in this triangle
-        let first_vertex_color = skin_vertex_positions.iter()
-            .find(|(pos, _, _, color)| *pos == vertices[0])
-            .map(|(_, _, _, color)| *color)
-            .unwrap_or([0.5, 0.5, 0.5, 0.5]); // Default gray if no color found
-        skin_vertex_colors.push(first_vertex_color);
+    for (name, (vertices, color)) in &triangles {
+        // Use the triangle's own color
+        skin_vertex_colors.push(*color);
     }
     
     // Debug output for triangles
     println!("INITIAL TRIANGLES:");
-    for (name, verts) in &triangles {
-        println!("Triangle {}: {:?}, {:?}, {:?}", name, verts[0], verts[1], verts[2]);
+    for (name, (verts, color)) in &triangles {
+        println!("Triangle {}: {:?}, {:?}, {:?}, color: {:?}", name, verts[0], verts[1], verts[2], color);
     }
 
     mesh_data.skin_vertex_positions = skin_vertex_positions;
@@ -985,8 +1029,8 @@ fn setup(
     mesh_data.skin_vertex_colors = skin_vertex_colors;
 
     println!("[SETUP] FINAL MESHDATA: {} triangles stored in MeshData", mesh_data.triangles.len());
-    for (name, verts) in &mesh_data.triangles {
-        println!("[SETUP] FINAL TRIANGLE: '{}' vertices: [{:?}, {:?}, {:?}]", name, verts[0], verts[1], verts[2]);
+    for (name, (verts, color)) in &mesh_data.triangles {
+        println!("[SETUP] FINAL TRIANGLE: '{}' vertices: [{:?}, {:?}, {:?}], color: {:?}", name, verts[0], verts[1], verts[2], color);
     }
 
     commands.insert_resource(mesh_data);
@@ -1047,32 +1091,155 @@ fn mouse_wheel(
 fn update_camera(
     time: Res<Time>,
     keyboard: Res<ButtonInput<KeyCode>>,
-    mut query: Query<&mut Transform, With<Camera>>,
+    mut camera_query: Query<(&mut Transform, &mut CameraController), With<Camera>>,
+    mut model_rotation: ResMut<ModelRotation>,
+    mut camera_state: ResMut<CameraState>,
+    mesh_data: Option<Res<MeshData>>,
 ) {
-    let mut transform = query.single_mut();
-    let speed = 5.0;
+    let (mut transform, mut controller) = camera_query.single_mut();
     let delta = time.delta_seconds();
 
-    let forward = transform.forward();
-    let right = transform.right();
+    // Shift modifier - Faster movement
+    let speed_multiplier = if keyboard.pressed(KeyCode::ShiftLeft) || keyboard.pressed(KeyCode::ShiftRight) {
+        3.0 // 3x faster when holding Shift
+    } else {
+        1.0
+    };
 
+    // W, A, S, D - Model movement/rotation
     if keyboard.pressed(KeyCode::KeyW) {
-        transform.translation += forward * speed * delta;
+        // W - Rotate model forward around X-axis
+        let rotation = Quat::from_rotation_x(-controller.rotation_speed * speed_multiplier * delta);
+        model_rotation.rotation = rotation * model_rotation.rotation;
     }
     if keyboard.pressed(KeyCode::KeyS) {
-        transform.translation -= forward * speed * delta;
+        // S - Rotate model backward around X-axis
+        let rotation = Quat::from_rotation_x(controller.rotation_speed * speed_multiplier * delta);
+        model_rotation.rotation = rotation * model_rotation.rotation;
     }
     if keyboard.pressed(KeyCode::KeyA) {
-        transform.translation -= right * speed * delta;
+        // A - Rotate model left around Y-axis
+        let rotation = Quat::from_rotation_y(controller.rotation_speed * speed_multiplier * delta);
+        model_rotation.rotation = rotation * model_rotation.rotation;
     }
     if keyboard.pressed(KeyCode::KeyD) {
-        transform.translation += right * speed * delta;
+        // D - Rotate model right around Y-axis
+        let rotation = Quat::from_rotation_y(-controller.rotation_speed * speed_multiplier * delta);
+        model_rotation.rotation = rotation * model_rotation.rotation;
     }
-    if keyboard.pressed(KeyCode::KeyQ) {
-        transform.translation += Vec3::Y * speed * delta;
+
+    // Arrow keys - Camera movement (only if CTRL is not pressed)
+    if !(keyboard.pressed(KeyCode::ControlLeft) || keyboard.pressed(KeyCode::ControlRight)) {
+        if keyboard.pressed(KeyCode::ArrowUp) {
+            // Move camera up
+            transform.translation += Vec3::Y * controller.movement_speed * speed_multiplier * delta;
+        }
+        if keyboard.pressed(KeyCode::ArrowDown) {
+            // Move camera down
+            transform.translation -= Vec3::Y * controller.movement_speed * speed_multiplier * delta;
+        }
+        if keyboard.pressed(KeyCode::ArrowLeft) {
+            // Move camera left
+            let left = -transform.right();
+            transform.translation += left * controller.movement_speed * speed_multiplier * delta;
+        }
+        if keyboard.pressed(KeyCode::ArrowRight) {
+            // Move camera right
+            let right = transform.right();
+            transform.translation += right * controller.movement_speed * speed_multiplier * delta;
+        }
     }
-    if keyboard.pressed(KeyCode::KeyE) {
-        transform.translation -= Vec3::Y * speed * delta;
+
+    // CTRL + Arrow keys - Look-at target adjustment
+    if keyboard.pressed(KeyCode::ControlLeft) || keyboard.pressed(KeyCode::ControlRight) {
+        if keyboard.pressed(KeyCode::ArrowUp) {
+            // Look up
+            controller.look_at_target.y += controller.movement_speed * speed_multiplier * delta;
+        }
+        if keyboard.pressed(KeyCode::ArrowDown) {
+            // Look down
+            controller.look_at_target.y -= controller.movement_speed * speed_multiplier * delta;
+        }
+        if keyboard.pressed(KeyCode::ArrowLeft) {
+            // Look left
+            controller.look_at_target.x -= controller.movement_speed * speed_multiplier * delta;
+        }
+        if keyboard.pressed(KeyCode::ArrowRight) {
+            // Look right
+            controller.look_at_target.x += controller.movement_speed * speed_multiplier * delta;
+        }
+    }
+
+    // Use Page Up/Page Down for zoom instead of +/- (easier to handle)
+    if keyboard.pressed(KeyCode::PageUp) || keyboard.pressed(KeyCode::NumpadAdd) {
+        // Zoom in
+        let forward = (controller.look_at_target - transform.translation).normalize();
+        transform.translation += forward * controller.zoom_speed * speed_multiplier * delta;
+    }
+    if keyboard.pressed(KeyCode::PageDown) || keyboard.pressed(KeyCode::NumpadSubtract) {
+        // Zoom out
+        let forward = (controller.look_at_target - transform.translation).normalize();
+        transform.translation -= forward * controller.zoom_speed * speed_multiplier * delta;
+    }
+
+    // R key - Reset camera to default position
+    if keyboard.just_pressed(KeyCode::KeyR) {
+        transform.translation = camera_state.default_position;
+        controller.look_at_target = camera_state.default_target;
+        model_rotation.rotation = Quat::IDENTITY;
+    }
+    
+    // F key - Focus/frame the model
+    if keyboard.just_pressed(KeyCode::KeyF) {
+        if let Some(mesh_data) = mesh_data.as_ref() {
+            // Calculate model bounds
+            let mut min_bounds = Vec3::splat(f32::INFINITY);
+            let mut max_bounds = Vec3::splat(f32::NEG_INFINITY);
+            
+            // Check triangles
+            for (_, (vertices, _)) in &mesh_data.triangles {
+                for vertex in vertices {
+                    let rotated_vertex = model_rotation.rotation * (*vertex);
+                    min_bounds = min_bounds.min(rotated_vertex);
+                    max_bounds = max_bounds.max(rotated_vertex);
+                }
+            }
+            
+            // Check bone positions
+            for (_, bone_pos) in &mesh_data.positions {
+                let rotated_start = model_rotation.rotation * bone_pos.start;
+                let rotated_end = model_rotation.rotation * bone_pos.end;
+                min_bounds = min_bounds.min(rotated_start);
+                max_bounds = max_bounds.max(rotated_start);
+                min_bounds = min_bounds.min(rotated_end);
+                max_bounds = max_bounds.max(rotated_end);
+            }
+            
+            if min_bounds.is_finite() && max_bounds.is_finite() {
+                let center = (min_bounds + max_bounds) * 0.5;
+                let size = (max_bounds - min_bounds).length();
+                let distance = size * 1.5; // Add some padding
+                
+                controller.look_at_target = center;
+                transform.translation = center + Vec3::new(distance, distance, distance).normalize() * distance;
+            }
+        }
+    }
+    
+    // Tab key - Toggle camera mode
+    if keyboard.just_pressed(KeyCode::Tab) {
+        camera_state.mode = match camera_state.mode {
+            CameraMode::Free => CameraMode::Orbit,
+            CameraMode::Orbit => CameraMode::Free,
+        };
+    }
+
+    // Update camera to look at target only when CTRL+arrows are pressed (look_at_target changes)
+    if keyboard.pressed(KeyCode::ControlLeft) || keyboard.pressed(KeyCode::ControlRight) {
+        if keyboard.pressed(KeyCode::ArrowUp) || keyboard.pressed(KeyCode::ArrowDown) ||
+           keyboard.pressed(KeyCode::ArrowLeft) || keyboard.pressed(KeyCode::ArrowRight) {
+            transform.look_at(controller.look_at_target, Vec3::Y);
+        }
     }
 }
 
@@ -1096,27 +1263,8 @@ fn keyboard_input(
         // Store current distance from origin
         let distance = (transform.translation - origin).length();
         
-        // X-axis rotation (pitch) - Up/Down arrows
-        if keyboard.pressed(KeyCode::ArrowUp) {
-            let right: Vec3 = (*transform.right()).into();
-            let rotation = Quat::from_axis_angle(right, -rotation_speed * delta);
-            transform.rotate_around(origin, rotation);
-        }
-        if keyboard.pressed(KeyCode::ArrowDown) {
-            let right: Vec3 = (*transform.right()).into();
-            let rotation = Quat::from_axis_angle(right, rotation_speed * delta);
-            transform.rotate_around(origin, rotation);
-        }
+        // Arrow key rotation removed - now handled in update_camera
         
-        // Y-axis rotation (yaw) - Left/Right arrows
-        if keyboard.pressed(KeyCode::ArrowLeft) {
-            let rotation = Quat::from_rotation_y(rotation_speed * delta);
-            transform.rotate_around(origin, rotation);
-        }
-        if keyboard.pressed(KeyCode::ArrowRight) {
-            let rotation = Quat::from_rotation_y(-rotation_speed * delta);
-            transform.rotate_around(origin, rotation);
-        }
         
         // Z-axis rotation (roll) - X and Z keys
         if keyboard.pressed(KeyCode::KeyX) {
@@ -1131,9 +1279,7 @@ fn keyboard_input(
         }
         
         // Maintain distance from origin after any rotation
-        if keyboard.pressed(KeyCode::ArrowUp) || keyboard.pressed(KeyCode::ArrowDown) ||
-           keyboard.pressed(KeyCode::ArrowLeft) || keyboard.pressed(KeyCode::ArrowRight) ||
-           keyboard.pressed(KeyCode::KeyX) || keyboard.pressed(KeyCode::KeyZ) {
+        if keyboard.pressed(KeyCode::KeyX) || keyboard.pressed(KeyCode::KeyZ) {
             let dir = (transform.translation - origin).normalize();
             transform.translation = origin + dir * distance;
         }
@@ -1193,6 +1339,7 @@ fn update_triangle_meshes(
     mesh_data: Option<Res<MeshData>>,
     settings: Res<VisualizationSettings>,
     mut triangle_handles: ResMut<TriangleMeshHandles>,
+    model_rotation: Res<ModelRotation>,
 ) {
     println!("[TRIANGLE SYSTEM] update_triangle_meshes called");
     
@@ -1232,31 +1379,36 @@ fn update_triangle_meshes(
              mesh_data.triangles.len(), mesh_data.skin_vertex_positions.len(), mesh_data.positions.len());
                  
     // Print the first few triangles for debugging
-    for (name, vertices) in mesh_data.triangles.iter().take(3) {
-        println!("TRIANGLE FOUND: '{}' with vertices at: [{:?}, {:?}, {:?}]", 
-                 name, vertices[0], vertices[1], vertices[2]);
+    for (name, (vertices, color)) in mesh_data.triangles.iter().take(3) {
+        println!("TRIANGLE FOUND: '{}' with vertices at: [{:?}, {:?}, {:?}], color: {:?}", 
+                 name, vertices[0], vertices[1], vertices[2], color);
     }
     
     println!("UPDATING: Creating {} triangle meshes", mesh_data.triangles.len());
 
     // Create triangle meshes
-    for (i, (name, vertices)) in mesh_data.triangles.iter().enumerate() {
+    for (i, (name, (vertices, color))) in mesh_data.triangles.iter().enumerate() {
             println!("MESH: Creating triangle mesh '{}'", name);
             
-            println!("[MESH CREATE] Creating mesh for triangle '{}' with vertices: {:?}, {:?}, {:?}", 
-                     name, vertices[0], vertices[1], vertices[2]);
+            println!("[MESH CREATE] Creating mesh for triangle '{}' with vertices: {:?}, {:?}, {:?}, color: {:?}", 
+                     name, vertices[0], vertices[1], vertices[2], color);
                      
             // Create a mesh for this triangle
             let mut mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default());
             
+            // Apply model rotation to triangle vertices
+            let rotated_v0 = model_rotation.rotation * vertices[0];
+            let rotated_v1 = model_rotation.rotation * vertices[1];
+            let rotated_v2 = model_rotation.rotation * vertices[2];
+            
             // Set vertex positions (just the 3 vertices)
             mesh.insert_attribute(
                 Mesh::ATTRIBUTE_POSITION, 
-                vec![vertices[0], vertices[1], vertices[2]]
+                vec![rotated_v0, rotated_v1, rotated_v2]
             );
             
             // Set normals (all facing the same direction for simplicity)
-            let normal = (vertices[1] - vertices[0]).cross(vertices[2] - vertices[0]).normalize();
+            let normal = (rotated_v1 - rotated_v0).cross(rotated_v2 - rotated_v0).normalize();
             mesh.insert_attribute(
                 Mesh::ATTRIBUTE_NORMAL, 
                 vec![normal, normal, normal]
@@ -1271,34 +1423,7 @@ fn update_triangle_meshes(
             // Set indices
             mesh.insert_indices(Indices::U32(vec![0, 1, 2]));
             
-            // Get the color from the vertex colors in the TOML file
-            // We'll try to find the first matching vertex position in skin_vertex_positions
-            // and extract its color
-            let mut found_color = None;
-            
-            // Look for vertex colors in the skin_vertex_positions
-            for (pos, _, id, col) in &mesh_data.skin_vertex_positions {
-                if pos == &vertices[0] || pos == &vertices[1] || pos == &vertices[2] {
-                    // We found a match, use its color
-                    found_color = Some(*col);
-                    println!("Found color {:?} from vertex with position {:?}, id {:?}", col, pos, id);
-                    break;
-                }
-            }
-            
-            // If we found a color from the TOML vertices, use it
-            // Otherwise use a default based on the triangle name
-            let color = if let Some(col) = found_color {
-                col
-            } else if name == "f1" || name == "f2" {
-                // Fallback for f1/f2 triangles
-                [0.0, 0.0, 1.0, 0.5]
-            } else {
-                // Default fallback for any other triangles
-                [0.5, 0.5, 0.5, 0.5]
-            };
-            
-            // Print the color to debug
+            // Use the triangle's own color from the TOML file
             println!("Triangle {}: Using color {:?}", name, color);
             
             // Create a material with fixed color that's not affected by lighting
@@ -1338,24 +1463,28 @@ fn draw_bones(
     mut gizmos: Gizmos,
     mesh_data: Option<Res<MeshData>>,
     _settings: Res<VisualizationSettings>,
+    model_rotation: Res<ModelRotation>,
 ) {
     if let Some(mesh_data) = mesh_data {
         // Draw bones
         for bone in mesh_data.positions.values() {
-            // Draw bone using pre-transformed positions
+            // Apply model rotation to bone positions
+            let rotated_start = model_rotation.rotation * bone.start;
+            let rotated_end = model_rotation.rotation * bone.end;
             gizmos.line(
-                bone.start,
-                bone.end,
+                rotated_start,
+                rotated_end,
                 Color::rgb(bone.color.0[0], bone.color.0[1], bone.color.0[2])
             );
         }
         
         // Draw skin vertices as spheres
         for (i, (position, color, _, _)) in mesh_data.skin_vertex_positions.iter().enumerate() {
-            // Draw a sphere at the vertex position
+            // Apply model rotation to vertex position
+            let rotated_position = model_rotation.rotation * (*position);
             let sphere_radius = 0.005; // Size of the sphere (reduced to 10% of original 0.05)
             gizmos.sphere(
-                *position,
+                rotated_position,
                 Quat::IDENTITY,
                 sphere_radius,
                 Color::rgb(color[0], color[1], color[2])
@@ -1368,6 +1497,7 @@ fn draw_triangles(
     mut gizmos: Gizmos,
     mesh_data: Option<Res<MeshData>>,
     settings: Res<VisualizationSettings>,
+    model_rotation: Res<ModelRotation>,
 ) {
     // Debug the triangle visibility settings
     println!("[DRAW TRIANGLES] mesh_data.is_some()={}, settings.show_triangles={}", 
@@ -1383,25 +1513,27 @@ fn draw_triangles(
     
     if let Some(mesh_data) = mesh_data {
         // Draw triangle outlines only - the mesh system handles the filling
-        for (i, (name, vertices)) in mesh_data.triangles.iter().enumerate() {
-            // Get the fill color of the triangle
-            let fill_color = mesh_data.skin_vertex_colors.get(i).unwrap_or(&[0.5, 0.5, 0.5, 0.5]);
-            
+        for (i, (name, (vertices, fill_color))) in mesh_data.triangles.iter().enumerate() {
             // Determine outline color based on settings
             let outline_color = match settings.triangle_outline {
                 TriangleOutlineMode::Black => Color::BLACK,
                 TriangleOutlineMode::Matching => Color::rgba(fill_color[0], fill_color[1], fill_color[2], 1.0), // Full opacity
             };
             
+            // Apply model rotation to triangle vertices
+            let rotated_v0 = model_rotation.rotation * vertices[0];
+            let rotated_v1 = model_rotation.rotation * vertices[1];
+            let rotated_v2 = model_rotation.rotation * vertices[2];
+            
             // Draw the triangle outline
-            gizmos.line(vertices[0], vertices[1], outline_color);
-            gizmos.line(vertices[1], vertices[2], outline_color);
-            gizmos.line(vertices[2], vertices[0], outline_color);
+            gizmos.line(rotated_v0, rotated_v1, outline_color);
+            gizmos.line(rotated_v1, rotated_v2, outline_color);
+            gizmos.line(rotated_v2, rotated_v0, outline_color);
         }
     }
 }
 
-fn draw_axes(mut gizmos: Gizmos, show_axes: Res<ShowAxes>) {
+fn draw_axes(mut gizmos: Gizmos, show_axes: Res<ShowAxes>, model_rotation: Res<ModelRotation>) {
     if !show_axes.0 {
         return;
     }
@@ -1417,18 +1549,14 @@ fn draw_axes(mut gizmos: Gizmos, show_axes: Res<ShowAxes>) {
         let color = Color::rgba(0.5, 0.5, 0.5, alpha);
 
         // X-parallel lines
-        gizmos.line(
-            Vec3::new(-grid_extent, 0.0, offset),
-            Vec3::new(grid_extent, 0.0, offset),
-            color,
-        );
+        let start_x = model_rotation.rotation * Vec3::new(-grid_extent, 0.0, offset);
+        let end_x = model_rotation.rotation * Vec3::new(grid_extent, 0.0, offset);
+        gizmos.line(start_x, end_x, color);
 
         // Z-parallel lines
-        gizmos.line(
-            Vec3::new(offset, 0.0, -grid_extent),
-            Vec3::new(offset, 0.0, grid_extent),
-            color,
-        );
+        let start_z = model_rotation.rotation * Vec3::new(offset, 0.0, -grid_extent);
+        let end_z = model_rotation.rotation * Vec3::new(offset, 0.0, grid_extent);
+        gizmos.line(start_z, end_z, color);
     }
 }
 
@@ -1491,8 +1619,8 @@ fn update_ui(
                 ui.separator();
                 ui.heading("Triangles");
                 ui.label(format!("Triangle count: {}", mesh_data.triangles.len()));
-                for (name, vertices) in &mesh_data.triangles {
-                    ui.label(format!("Triangle {}: {:?}, {:?}, {:?}", name, vertices[0], vertices[1], vertices[2]));
+                for (name, (vertices, color)) in &mesh_data.triangles {
+                    ui.label(format!("Triangle {}: {:?}, {:?}, {:?}, color: {:?}", name, vertices[0], vertices[1], vertices[2], color));
                 }
             }
         });
@@ -1592,7 +1720,7 @@ fn export_to_glb(mesh_data: &MeshData, export_path: &Path) -> Result<(), Box<dyn
     if !mesh_data.triangles.is_empty() {
         println!("Using {} defined triangles from skin vertices", mesh_data.triangles.len());
         
-        for (_, vertices) in &mesh_data.triangles {
+        for (_, (vertices, _color)) in &mesh_data.triangles {
             for vert in vertices {
                 let key = format!("{:.6},{:.6},{:.6}", vert.x, vert.y, vert.z);
                 if let Some(&index) = vertex_to_index.get(&key) {
@@ -1877,6 +2005,8 @@ fn main() {
         .add_plugins(DefaultPlugins)
         .add_plugins(EguiPlugin)
         .insert_resource(MeshFile(mesh_file))
+        .insert_resource(ModelRotation::default())
+        .insert_resource(CameraState::default())
         .insert_resource(if let Some(path) = export_path {
             ExportPath(path)
         } else {
