@@ -5,7 +5,7 @@ use bevy::{
     render::camera::Camera,
     input::{
         mouse::{MouseMotion, MouseWheel, MouseButton},
-        keyboard::KeyCode,
+        keyboard::{KeyCode, KeyboardInput},
     },
     pbr::{AlphaMode, StandardMaterial},
     render::mesh::{Indices, PrimitiveTopology},
@@ -896,10 +896,10 @@ fn setup(
                 // Calculate position of skin vertex using the bone's start and end
                 let position = skin_vert.calculate_position(*start, *end, bone.resolved_rotation);
                 
-                // Use the skin vertex's color if available, otherwise use bone's color or default
-                let color = skin_vert.color
-                    .or_else(|| bone.color)
-                    .unwrap_or_else(|| [0.5, 0.5, 0.5, 0.5]);
+                // Use the bone's rainbow color for skin vertices
+                let bone_depth = get_bone_depth(full_path.as_str());
+                let bone_color = get_rainbow_color(bone_depth, max_depth).0;
+                let color = [bone_color[0], bone_color[1], bone_color[2], 1.0];
                 
                 // Store the vertex position and ID
                 let id = skin_vert.id.clone().unwrap_or_else(|| full_path.clone());
@@ -1170,13 +1170,17 @@ fn update_camera(
         }
     }
 
-    // Use Page Up/Page Down for zoom instead of +/- (easier to handle)
-    if keyboard.pressed(KeyCode::PageUp) || keyboard.pressed(KeyCode::NumpadAdd) {
+    // Use Page Up/Page Down and +/- keys for zoom
+    // Note: + key requires checking both Equal key and Shift modifier
+    let plus_pressed = keyboard.pressed(KeyCode::Equal) && 
+                      (keyboard.pressed(KeyCode::ShiftLeft) || keyboard.pressed(KeyCode::ShiftRight));
+    if keyboard.pressed(KeyCode::PageUp) || keyboard.pressed(KeyCode::NumpadAdd) || plus_pressed {
         // Zoom in
         let forward = (controller.look_at_target - transform.translation).normalize();
         transform.translation += forward * controller.zoom_speed * speed_multiplier * delta;
     }
-    if keyboard.pressed(KeyCode::PageDown) || keyboard.pressed(KeyCode::NumpadSubtract) {
+    if keyboard.pressed(KeyCode::PageDown) || keyboard.pressed(KeyCode::NumpadSubtract) || 
+       keyboard.pressed(KeyCode::Minus) {
         // Zoom out
         let forward = (controller.look_at_target - transform.translation).normalize();
         transform.translation -= forward * controller.zoom_speed * speed_multiplier * delta;
@@ -1286,6 +1290,39 @@ fn keyboard_input(
     }
 }
 
+fn handle_character_zoom(
+    mut char_input_events: EventReader<KeyboardInput>,
+    mut camera_query: Query<(&mut Transform, &CameraController), With<Camera>>,
+    time: Res<Time>,
+) {
+    if let Ok((mut transform, controller)) = camera_query.get_single_mut() {
+        let delta = time.delta_seconds();
+        
+        for event in char_input_events.read() {
+            // Only process key presses, not releases
+            if !event.state.is_pressed() {
+                continue;
+            }
+            
+            if let bevy::input::keyboard::Key::Character(character) = &event.logical_key {
+                match character.as_str() {
+                    "+" => {
+                        // Zoom in
+                        let forward = (controller.look_at_target - transform.translation).normalize();
+                        transform.translation += forward * controller.zoom_speed * delta * 10.0; // Multiply by 10 for responsiveness
+                    }
+                    "-" => {
+                        // Zoom out
+                        let forward = (controller.look_at_target - transform.translation).normalize();
+                        transform.translation -= forward * controller.zoom_speed * delta * 10.0; // Multiply by 10 for responsiveness
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+}
+
 fn mouse_motion(
     mut motion_evr: EventReader<MouseMotion>,
     mouse_button_input: Res<ButtonInput<MouseButton>>,
@@ -1362,7 +1399,7 @@ fn update_triangle_meshes(
     }
 
     // Check if we need to update triangles (either no triangles exist or mesh data changed)
-    let needs_update = triangle_handles.handles.is_empty() || mesh_data.is_changed();
+    let needs_update = triangle_handles.handles.is_empty() || mesh_data.is_changed() || model_rotation.is_changed();
     
     println!("[TRIANGLE SYSTEM] needs_update: {}, handles_empty: {}, data_changed: {}", needs_update, triangle_handles.handles.is_empty(), mesh_data.is_changed());
     
@@ -2021,6 +2058,7 @@ fn main() {
                 monitor_file,
                 handle_file_changes,
                 keyboard_input,
+                handle_character_zoom,
                 mouse_motion,
                 mouse_wheel,
                 mouse_button_input,
@@ -2029,8 +2067,9 @@ fn main() {
             ).chain(),
         )
         .add_systems(Update, update_triangle_meshes.after(handle_file_changes))
+        .add_systems(Update, draw_triangles.after(update_triangle_meshes))
         // Make sure the UI system runs after EguiSet::InitContexts
         .add_systems(Update, update_ui.after(bevy_egui::EguiSet::InitContexts))
-        .add_systems(PostUpdate, (draw_bones, draw_triangles, draw_axes))
+        .add_systems(PostUpdate, (draw_bones, draw_axes))
         .run();
 }
