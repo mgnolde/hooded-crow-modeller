@@ -1515,11 +1515,21 @@ fn draw_bones(
             );
         }
         
+        // Draw bone start positions as small cubes
+        for bone in mesh_data.positions.values() {
+            let rotated_start = model_rotation.rotation * bone.start;
+            let cube_size = 0.01; // Small cube marker
+            gizmos.cuboid(
+                Transform::from_translation(rotated_start).with_scale(Vec3::splat(cube_size)),
+                Color::rgb(bone.color.0[0], bone.color.0[1], bone.color.0[2])
+            );
+        }
+        
         // Draw skin vertices as spheres
         for (i, (position, color, _, _)) in mesh_data.skin_vertex_positions.iter().enumerate() {
             // Apply model rotation to vertex position
             let rotated_position = model_rotation.rotation * (*position);
-            let sphere_radius = 0.005; // Size of the sphere (reduced to 10% of original 0.05)
+            let sphere_radius = 0.0025; // Size of the sphere (half of previous 0.005)
             gizmos.sphere(
                 rotated_position,
                 Quat::IDENTITY,
