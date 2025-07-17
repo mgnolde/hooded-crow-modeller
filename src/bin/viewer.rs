@@ -1613,6 +1613,7 @@ fn update_ui(
     mesh_data: Option<Res<MeshData>>,
     camera_query: Query<(&Camera, &GlobalTransform), With<Camera>>,
     _windows: Query<&Window>,
+    model_rotation: Res<ModelRotation>,
 ) {
     let ctx = contexts.ctx_mut();
 
@@ -1679,7 +1680,8 @@ fn update_ui(
             .filter_map(|(path, bone)| {
                 let name = path.split('.').last()?;
                 let center = bone.start.lerp(bone.end, 0.5);
-                let screen_pos = camera.world_to_viewport(camera_transform, center)?;
+                let rotated_center = model_rotation.rotation * center;
+                let screen_pos = camera.world_to_viewport(camera_transform, rotated_center)?;
                 Some((name.to_string(), screen_pos))
             })
             .collect();
@@ -1705,7 +1707,8 @@ fn update_ui(
                 let id = id.as_ref()?;
                 // Extract just the last part of the ID (after the last dot)
                 let name = id.split('.').last().unwrap_or(id);
-                let screen_pos = camera.world_to_viewport(camera_transform, *position)?;
+                let rotated_position = model_rotation.rotation * (*position);
+                let screen_pos = camera.world_to_viewport(camera_transform, rotated_position)?;
                 Some((name.to_string(), screen_pos))
             })
             .collect();
