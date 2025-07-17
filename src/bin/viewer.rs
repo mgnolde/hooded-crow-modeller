@@ -1513,14 +1513,27 @@ fn draw_bones(
             );
         }
         
-        // Draw bone start positions as small cubes
+        // Draw bone end positions as arrow markers to indicate direction
         for bone in mesh_data.positions.values() {
             let rotated_start = model_rotation.rotation * bone.start;
-            let cube_size = 0.01; // Small cube marker
-            gizmos.cuboid(
-                Transform::from_translation(rotated_start).with_scale(Vec3::splat(cube_size)),
-                Color::rgb(bone.color.0[0], bone.color.0[1], bone.color.0[2])
-            );
+            let rotated_end = model_rotation.rotation * bone.end;
+            let bone_direction = (rotated_end - rotated_start).normalize();
+            let bone_color = Color::rgb(bone.color.0[0], bone.color.0[1], bone.color.0[2]);
+            
+            // Create arrow marker at the end of the bone
+            let arrow_size = 0.02;
+            let arrow_back = rotated_end - bone_direction * arrow_size;
+            
+            // Create perpendicular vectors for arrow lines
+            let up = if bone_direction.y.abs() < 0.9 { Vec3::Y } else { Vec3::X };
+            let right = bone_direction.cross(up).normalize() * arrow_size * 0.5;
+            let up_vec = right.cross(bone_direction).normalize() * arrow_size * 0.5;
+            
+            // Draw 4 lines forming a diamond-shaped arrow head
+            gizmos.line(rotated_end, arrow_back + right, bone_color);
+            gizmos.line(rotated_end, arrow_back - right, bone_color);
+            gizmos.line(rotated_end, arrow_back + up_vec, bone_color);
+            gizmos.line(rotated_end, arrow_back - up_vec, bone_color);
         }
         
         // Draw skin vertices as spheres
