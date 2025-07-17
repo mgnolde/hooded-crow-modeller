@@ -535,10 +535,8 @@ fn handle_file_changes(
                     // Calculate position of skin vertex using the bone's start and end
                     let position = skin_vert.calculate_position(*start, *end, bone.resolved_rotation);
                     
-                    // Use the skin vertex's color if available, otherwise use bone's color or default
-                    let color = skin_vert.color
-                        .or_else(|| bone.color)
-                        .unwrap_or_else(|| [0.5, 0.5, 0.5, 0.5]);
+                    // Use the bone's color or default (triangle colors are defined separately)
+                    let color = bone.color.unwrap_or_else(|| [0.5, 0.5, 0.5, 0.5]);
                     
                     // Store the vertex position and ID
                     let id = skin_vert.id.clone().unwrap_or_else(|| full_path.clone());

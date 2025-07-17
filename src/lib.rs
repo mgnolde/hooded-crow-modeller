@@ -56,7 +56,7 @@ pub struct TriangleDefinition {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct SkinVert {
     #[serde(default, alias = "len")]
-    pub segment_length: f32,  // Position along the bone
+    pub frac: f32,  // Fractional position along the bone (0.0 = start, 1.0 = end)
     #[serde(default, alias = "dist")]
     pub distance: f32,        // Distance from the bone
     #[serde(default, alias = "rot")]
@@ -67,21 +67,18 @@ pub struct SkinVert {
     pub id: Option<String>,   // Optional identifier for the skin vertex
     #[serde(default, alias = "tri")]
     pub triangles: HashMap<String, usize>, // Triangle references: face_name -> vertex position
-    #[serde(default, alias = "col")]
-    pub color: Option<[f32; 4]>, // Color for this vertex
 }
 
 impl Default for SkinVert {
     fn default() -> Self {
-        eprintln!("[SKINVERT DEBUG] SkinVert::default() called. Creating default SkinVert: seg_len=0.5, dist=0.0, rot=0.0");
+        eprintln!("[SKINVERT DEBUG] SkinVert::default() called. Creating default SkinVert: frac=0.5, dist=0.0, rot=0.0");
         Self {
-            segment_length: 0.5,  // Default to middle of the bone
+            frac: 0.5,  // Default to middle of the bone
             distance: 0.0,        // Default to on the bone
             rotation: 0.0,        // Default to 0 degrees
             weight: 1.0,          // Default to full weight
             id: None,             // Default to no id
             triangles: HashMap::new(), // Default to no triangle references
-            color: None,          // Default to no color
         }
     }
 }
@@ -89,14 +86,14 @@ impl Default for SkinVert {
 impl SkinVert {
     /// Calculate the position of this skin vertex relative to the bone
     pub fn calculate_position(&self, bone_start: Vec3, bone_end: Vec3, bone_rotation: f32) -> Vec3 {
-        eprintln!("[SKINVERT DEBUG] CALC_POS for SV id: {:?}, seg_len: {}, dist: {}, sv_rot: {}", self.id, self.segment_length, self.distance, self.rotation);
+        eprintln!("[SKINVERT DEBUG] CALC_POS for SV id: {:?}, frac: {}, dist: {}, sv_rot: {}", self.id, self.frac, self.distance, self.rotation);
         eprintln!("[SKINVERT DEBUG]   CALC_POS inputs: bone_start: {:?}, bone_end: {:?}, bone_rotation (deg): {}", bone_start, bone_end, bone_rotation);
         // Calculate the direction of the bone
         let bone_direction = (bone_end - bone_start).normalize();
         let bone_length = (bone_end - bone_start).length();
         
-        // Find position along the bone based on segment_length
-        let segment_position = bone_start + bone_direction * bone_length * self.segment_length;
+        // Find position along the bone based on frac
+        let segment_position = bone_start + bone_direction * bone_length * self.frac;
         
         // If distance is very small, return the position on the bone
         if self.distance < 0.001 {
@@ -416,10 +413,11 @@ impl Model {
             let result: Vec<SkinVert> = skin_verts_array.iter().map(|v| {
                 let mut skin_vert = SkinVert::default();
                 // Check for both long and short field names
-                if let Some(segment_length) = v.get("segment_length")
+                if let Some(segment_length) = v.get("frac")
+                    .or_else(|| v.get("segment_length"))
                     .or_else(|| v.get("len"))
                     .and_then(|v| v.as_float()) {
-                    skin_vert.segment_length = segment_length as f32;
+                    skin_vert.frac = segment_length as f32;
                 }
                 if let Some(distance) = v.get("distance")
                     .or_else(|| v.get("dist"))
@@ -453,15 +451,6 @@ impl Model {
                     }
                 }
                 
-                // Parse color (check both long and short field names)
-                if let Some(color) = v.get("color")
-                    .or_else(|| v.get("col"))
-                    .and_then(|v| v.as_array()) {
-                    skin_vert.color = Some([color[0].as_float().unwrap_or(1.0) as f32,
-                                        color[1].as_float().unwrap_or(1.0) as f32,
-                                        color[2].as_float().unwrap_or(1.0) as f32,
-                                        color.get(3).and_then(|c| c.as_float()).unwrap_or(1.0) as f32]);
-                }
                 
                 skin_vert
             }).collect();
@@ -481,10 +470,11 @@ impl Model {
                     skin_vert.id = Some(id.to_string());
                     
                     // Check for both long and short field names
-                    if let Some(segment_length) = props.get("segment_length")
+                    if let Some(segment_length) = props.get("frac")
+                        .or_else(|| props.get("segment_length"))
                         .or_else(|| props.get("len"))
                         .and_then(|v| v.as_float()) {
-                        skin_vert.segment_length = segment_length as f32;
+                        skin_vert.frac = segment_length as f32;
                     }
                     if let Some(distance) = props.get("distance")
                         .or_else(|| props.get("dist"))
@@ -526,17 +516,8 @@ impl Model {
                         }
                     }
                     
-                    // Parse color (check both long and short field names)
-                    if let Some(color) = props.get("color")
-                        .or_else(|| props.get("col"))
-                        .and_then(|v| v.as_array()) {
-                        skin_vert.color = Some([color[0].as_float().unwrap_or(1.0) as f32,
-                                              color[1].as_float().unwrap_or(1.0) as f32,
-                                              color[2].as_float().unwrap_or(1.0) as f32,
-                                              color.get(3).and_then(|c| c.as_float()).unwrap_or(1.0) as f32]);
-                    }
-                    eprintln!("[SKINVERT DEBUG] PARSE_SKIN_VERTS (Table Format) - Parsed SkinVert: id={:?}, len={}, dist={}, rot={}", 
-                               skin_vert.id, skin_vert.segment_length, skin_vert.distance, skin_vert.rotation);
+                    eprintln!("[SKINVERT DEBUG] PARSE_SKIN_VERTS (Table Format) - Parsed SkinVert: id={:?}, frac={}, dist={}, rot={}", 
+                               skin_vert.id, skin_vert.frac, skin_vert.distance, skin_vert.rotation);
                     
                     skin_vert
                 }).collect();

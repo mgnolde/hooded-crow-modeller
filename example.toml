@@ -8,10 +8,10 @@ rot = 0
 
 [body.lower_spine.skin_verts]
 # Vertices with IDs but no triangle references
-ls1 = { len = 0.0, dist = 0.1, rot = 180, col = [0.0,0.0,0.0,0.5] }
-ls2 = { len = 0.0, dist = 0.15, rot = 240, col = [1.0,1.0,0.0,0.5] }
-ls3 = { len = 0.4, dist = 0.1, rot = 180, col = [1.0,1.0,0.0,0.5] }
-ls4 = { len = 0.4, dist = 0.15, rot = 240, col = [1.0,1.0,0.0,0.5] }
+ls1 = { frac = 0.0, dist = 0.1, rot = 180 }
+ls2 = { frac = 0.0, dist = 0.15, rot = 240 }
+ls3 = { frac = 0.4, dist = 0.1, rot = 180 }
+ls4 = { frac = 0.4, dist = 0.15, rot = 240 }
 
 # Triangle definitions referencing vertex IDs
 [body.lower_spine.triangles]
