@@ -1121,75 +1121,64 @@ fn update_camera(
     // Flag to track if we're doing camera movement (to completely disable model rotation)
     let mut camera_movement_active = false;
     
-    // WASD + QE keys for camera movement (keyboard layout independent)
+    // FIRST-PERSON FLY-THROUGH CAMERA CONTROLS
+    // WASD + QE keys for camera movement relative to camera orientation
     if keyboard.pressed(KeyCode::KeyW) || keyboard.pressed(KeyCode::KeyA) || keyboard.pressed(KeyCode::KeyS) || keyboard.pressed(KeyCode::KeyD) || keyboard.pressed(KeyCode::KeyQ) || keyboard.pressed(KeyCode::KeyE) {
         camera_movement_active = true;
     }
     
     if keyboard.pressed(KeyCode::KeyW) {
-        // W - Move camera forward
+        // W - Move forward in the direction the camera is looking
         let forward = transform.forward();
-        transform.translation += forward * controller.movement_speed * speed_multiplier * delta * 10.0;
+        transform.translation += forward * controller.movement_speed * speed_multiplier * delta * 1.0;
     }
     if keyboard.pressed(KeyCode::KeyS) {
-        // S - Move camera backward
+        // S - Move backward (opposite to camera direction)
         let backward = -transform.forward();
-        transform.translation += backward * controller.movement_speed * speed_multiplier * delta * 10.0;
+        transform.translation += backward * controller.movement_speed * speed_multiplier * delta * 1.0;
     }
     if keyboard.pressed(KeyCode::KeyA) {
-        // A - Move camera left
+        // A - Strafe left (relative to camera orientation)
         let left = -transform.right();
-        transform.translation += left * controller.movement_speed * speed_multiplier * delta * 10.0;
+        transform.translation += left * controller.movement_speed * speed_multiplier * delta * 1.0;
     }
     if keyboard.pressed(KeyCode::KeyD) {
-        // D - Move camera right
+        // D - Strafe right (relative to camera orientation)
         let right = transform.right();
-        transform.translation += right * controller.movement_speed * speed_multiplier * delta * 10.0;
+        transform.translation += right * controller.movement_speed * speed_multiplier * delta * 1.0;
     }
     if keyboard.pressed(KeyCode::KeyQ) {
-        // Q - Move camera down
-        transform.translation -= Vec3::Y * controller.movement_speed * speed_multiplier * delta * 10.0;
+        // Q - Move down in world space (not relative to camera)
+        transform.translation -= Vec3::Y * controller.movement_speed * speed_multiplier * delta * 1.0;
     }
     if keyboard.pressed(KeyCode::KeyE) {
-        // E - Move camera up
-        transform.translation += Vec3::Y * controller.movement_speed * speed_multiplier * delta * 10.0;
+        // E - Move up in world space (not relative to camera)
+        transform.translation += Vec3::Y * controller.movement_speed * speed_multiplier * delta * 1.0;
     }
     
-    // Keep CTRL + arrow keys for compatibility (if CTRL detection works)
-    if ctrl_pressed && (keyboard.pressed(KeyCode::ArrowUp) || keyboard.pressed(KeyCode::ArrowDown) || keyboard.pressed(KeyCode::ArrowLeft) || keyboard.pressed(KeyCode::ArrowRight)) {
-        camera_movement_active = true;
+    // ARROW KEYS for camera rotation (look around)
+    let look_sensitivity = 0.8; // degrees per frame - reduced for smoother control
+    if keyboard.pressed(KeyCode::ArrowUp) {
+        // Arrow Up - Look up
+        let rotation = Quat::from_rotation_x(-look_sensitivity * delta);
+        transform.rotate(rotation);
+    }
+    if keyboard.pressed(KeyCode::ArrowDown) {
+        // Arrow Down - Look down  
+        let rotation = Quat::from_rotation_x(look_sensitivity * delta);
+        transform.rotate(rotation);
+    }
+    if keyboard.pressed(KeyCode::ArrowLeft) {
+        // Arrow Left - Look left
+        let rotation = Quat::from_rotation_y(look_sensitivity * delta);
+        transform.rotate(rotation);
+    }
+    if keyboard.pressed(KeyCode::ArrowRight) {
+        // Arrow Right - Look right
+        let rotation = Quat::from_rotation_y(-look_sensitivity * delta);
+        transform.rotate(rotation);
     }
     
-    if keyboard.pressed(KeyCode::ArrowUp) && ctrl_pressed && !alt_pressed {
-        // Ctrl+↑ - Move camera up (with increased speed for visibility)
-        transform.translation += Vec3::Y * controller.movement_speed * speed_multiplier * delta * 10.0;
-    }
-    if keyboard.pressed(KeyCode::ArrowDown) && ctrl_pressed && !alt_pressed {
-        // Ctrl+↓ - Move camera down (with increased speed for visibility)
-        transform.translation -= Vec3::Y * controller.movement_speed * speed_multiplier * delta * 10.0;
-    }
-    if keyboard.pressed(KeyCode::ArrowLeft) && ctrl_pressed && !alt_pressed {
-        // Ctrl+← - Move camera left (with significantly increased speed for visibility)
-        let left = -transform.right();
-        transform.translation += left * controller.movement_speed * speed_multiplier * delta * 10.0;
-    }
-    if keyboard.pressed(KeyCode::ArrowRight) && ctrl_pressed && !alt_pressed {
-        // Ctrl+→ - Move camera right (with significantly increased speed for visibility)
-        let right = transform.right();
-        transform.translation += right * controller.movement_speed * speed_multiplier * delta * 10.0;
-    }
-    
-    // TEST: Use number pad keys for camera movement (should work consistently)
-    if keyboard.pressed(KeyCode::Numpad4) {
-        // Numpad4 - Move camera left
-        let left = -transform.right();
-        transform.translation += left * controller.movement_speed * speed_multiplier * delta * 3.0;
-    }
-    if keyboard.pressed(KeyCode::Numpad6) {
-        // Numpad6 - Move camera right
-        let right = transform.right();
-        transform.translation += right * controller.movement_speed * speed_multiplier * delta * 3.0;
-    }
     
     // X/Z keys for camera rotation (moved from keyboard_input function)
     if keyboard.pressed(KeyCode::KeyX) {
@@ -1262,25 +1251,35 @@ fn update_camera(
     let ctrl_currently_pressed = keyboard.pressed(KeyCode::ControlLeft) || keyboard.pressed(KeyCode::ControlRight);
     let alt_currently_pressed = keyboard.pressed(KeyCode::AltLeft) || keyboard.pressed(KeyCode::AltRight);
     
-    // ABSOLUTELY NO model rotation if camera movement is active
-    if !camera_movement_active && keyboard.pressed(KeyCode::ArrowUp) && !ctrl_currently_pressed && !alt_currently_pressed {
-        // ↑ - Rotate model forward around X-axis (pitch)
+    // NUMPAD KEYS for model rotation (separate from camera controls)
+    if keyboard.pressed(KeyCode::Numpad8) {
+        // Numpad 8 - Rotate model forward around X-axis (pitch)
         let rotation = Quat::from_rotation_x(-controller.rotation_speed * speed_multiplier * delta);
         model_rotation.rotation = rotation * model_rotation.rotation;
     }
-    if !camera_movement_active && keyboard.pressed(KeyCode::ArrowDown) && !ctrl_currently_pressed && !alt_currently_pressed {
-        // ↓ - Rotate model backward around X-axis (pitch)
+    if keyboard.pressed(KeyCode::Numpad2) {
+        // Numpad 2 - Rotate model backward around X-axis (pitch)
         let rotation = Quat::from_rotation_x(controller.rotation_speed * speed_multiplier * delta);
         model_rotation.rotation = rotation * model_rotation.rotation;
     }
-    if !camera_movement_active && keyboard.pressed(KeyCode::ArrowLeft) && !ctrl_currently_pressed && !alt_currently_pressed {
-        // ← - Rotate model left around Y-axis (yaw)
+    if keyboard.pressed(KeyCode::Numpad4) {
+        // Numpad 4 - Rotate model left around Y-axis (yaw)
         let rotation = Quat::from_rotation_y(controller.rotation_speed * speed_multiplier * delta);
         model_rotation.rotation = rotation * model_rotation.rotation;
     }
-    if !camera_movement_active && keyboard.pressed(KeyCode::ArrowRight) && !ctrl_currently_pressed && !alt_currently_pressed {
-        // → - Rotate model right around Y-axis (yaw)
+    if keyboard.pressed(KeyCode::Numpad6) {
+        // Numpad 6 - Rotate model right around Y-axis (yaw)
         let rotation = Quat::from_rotation_y(-controller.rotation_speed * speed_multiplier * delta);
+        model_rotation.rotation = rotation * model_rotation.rotation;
+    }
+    if keyboard.pressed(KeyCode::Numpad7) {
+        // Numpad 7 - Rotate model around Z-axis (roll left)
+        let rotation = Quat::from_rotation_z(controller.rotation_speed * speed_multiplier * delta);
+        model_rotation.rotation = rotation * model_rotation.rotation;
+    }
+    if keyboard.pressed(KeyCode::Numpad9) {
+        // Numpad 9 - Rotate model around Z-axis (roll right)
+        let rotation = Quat::from_rotation_z(-controller.rotation_speed * speed_multiplier * delta);
         model_rotation.rotation = rotation * model_rotation.rotation;
     }
     if keyboard.pressed(KeyCode::PageUp) && !ctrl_currently_pressed && !alt_currently_pressed {
@@ -1309,11 +1308,14 @@ fn update_camera(
         transform.translation -= forward * controller.zoom_speed * speed_multiplier * delta;
     }
 
-    // R key - Reset camera to default position
+    // R key - Reset camera to default position and orientation
     if keyboard.just_pressed(KeyCode::KeyR) {
         transform.translation = camera_state.default_position;
         controller.look_at_target = camera_state.default_target;
         model_rotation.rotation = Quat::IDENTITY;
+        
+        // Reset camera orientation to look at the target
+        *transform = transform.looking_at(camera_state.default_target, Vec3::Y);
     }
     
     // F key - Focus/frame the model
