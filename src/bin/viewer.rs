@@ -685,7 +685,6 @@ fn handle_file_changes(
                 .copied()
                 .unwrap_or([0.0, 0.0, 1.0, 0.5]); // Default to blue with 50% opacity
             
-            println!("Triangle {}: Using color {:?}", name, triangle_color);
             skin_vertex_colors.push(triangle_color);
         }
         
@@ -1104,81 +1103,207 @@ fn update_camera(
         1.0
     };
 
-    // W, A, S, D - Model movement/rotation
+    // UNIFIED CONTROL SYSTEM:
+    // Arrow keys (no modifier) - Model rotation around look_at_target
+    // CTRL + keys - Camera movement  
+    // ALT + keys - Look-at target movement
+    
+    let ctrl_pressed = keyboard.pressed(KeyCode::ControlLeft) || keyboard.pressed(KeyCode::ControlRight);
+    let alt_pressed = keyboard.pressed(KeyCode::AltLeft) || keyboard.pressed(KeyCode::AltRight);
+    
+    
+    
+    
+    
+    // EXPLICIT CONTROL HANDLING - Test each key with exact conditions
+    
+    // CTRL + Arrow keys = Camera movement
+    // Flag to track if we're doing camera movement (to completely disable model rotation)
+    let mut camera_movement_active = false;
+    
+    // WASD + QE keys for camera movement (keyboard layout independent)
+    if keyboard.pressed(KeyCode::KeyW) || keyboard.pressed(KeyCode::KeyA) || keyboard.pressed(KeyCode::KeyS) || keyboard.pressed(KeyCode::KeyD) || keyboard.pressed(KeyCode::KeyQ) || keyboard.pressed(KeyCode::KeyE) {
+        camera_movement_active = true;
+    }
+    
     if keyboard.pressed(KeyCode::KeyW) {
-        // W - Rotate model forward around X-axis
+        // W - Move camera forward
+        let forward = transform.forward();
+        transform.translation += forward * controller.movement_speed * speed_multiplier * delta * 10.0;
+    }
+    if keyboard.pressed(KeyCode::KeyS) {
+        // S - Move camera backward
+        let backward = -transform.forward();
+        transform.translation += backward * controller.movement_speed * speed_multiplier * delta * 10.0;
+    }
+    if keyboard.pressed(KeyCode::KeyA) {
+        // A - Move camera left
+        let left = -transform.right();
+        transform.translation += left * controller.movement_speed * speed_multiplier * delta * 10.0;
+    }
+    if keyboard.pressed(KeyCode::KeyD) {
+        // D - Move camera right
+        let right = transform.right();
+        transform.translation += right * controller.movement_speed * speed_multiplier * delta * 10.0;
+    }
+    if keyboard.pressed(KeyCode::KeyQ) {
+        // Q - Move camera down
+        transform.translation -= Vec3::Y * controller.movement_speed * speed_multiplier * delta * 10.0;
+    }
+    if keyboard.pressed(KeyCode::KeyE) {
+        // E - Move camera up
+        transform.translation += Vec3::Y * controller.movement_speed * speed_multiplier * delta * 10.0;
+    }
+    
+    // Keep CTRL + arrow keys for compatibility (if CTRL detection works)
+    if ctrl_pressed && (keyboard.pressed(KeyCode::ArrowUp) || keyboard.pressed(KeyCode::ArrowDown) || keyboard.pressed(KeyCode::ArrowLeft) || keyboard.pressed(KeyCode::ArrowRight)) {
+        camera_movement_active = true;
+    }
+    
+    if keyboard.pressed(KeyCode::ArrowUp) && ctrl_pressed && !alt_pressed {
+        // Ctrl+↑ - Move camera up (with increased speed for visibility)
+        transform.translation += Vec3::Y * controller.movement_speed * speed_multiplier * delta * 10.0;
+    }
+    if keyboard.pressed(KeyCode::ArrowDown) && ctrl_pressed && !alt_pressed {
+        // Ctrl+↓ - Move camera down (with increased speed for visibility)
+        transform.translation -= Vec3::Y * controller.movement_speed * speed_multiplier * delta * 10.0;
+    }
+    if keyboard.pressed(KeyCode::ArrowLeft) && ctrl_pressed && !alt_pressed {
+        // Ctrl+← - Move camera left (with significantly increased speed for visibility)
+        let left = -transform.right();
+        transform.translation += left * controller.movement_speed * speed_multiplier * delta * 10.0;
+    }
+    if keyboard.pressed(KeyCode::ArrowRight) && ctrl_pressed && !alt_pressed {
+        // Ctrl+→ - Move camera right (with significantly increased speed for visibility)
+        let right = transform.right();
+        transform.translation += right * controller.movement_speed * speed_multiplier * delta * 10.0;
+    }
+    
+    // TEST: Use number pad keys for camera movement (should work consistently)
+    if keyboard.pressed(KeyCode::Numpad4) {
+        // Numpad4 - Move camera left
+        let left = -transform.right();
+        transform.translation += left * controller.movement_speed * speed_multiplier * delta * 3.0;
+    }
+    if keyboard.pressed(KeyCode::Numpad6) {
+        // Numpad6 - Move camera right
+        let right = transform.right();
+        transform.translation += right * controller.movement_speed * speed_multiplier * delta * 3.0;
+    }
+    
+    // X/Z keys for camera rotation (moved from keyboard_input function)
+    if keyboard.pressed(KeyCode::KeyX) {
+        let forward: Vec3 = (*transform.forward()).into();
+        let rotation = Quat::from_axis_angle(forward, controller.rotation_speed * delta);
+        let origin = Vec3::ZERO;
+        let distance = (transform.translation - origin).length();
+        transform.rotate_around(origin, rotation);
+        // Maintain distance from origin after rotation
+        let dir = (transform.translation - origin).normalize();
+        transform.translation = origin + dir * distance;
+    }
+    if keyboard.pressed(KeyCode::KeyZ) {
+        let forward: Vec3 = (*transform.forward()).into();
+        let rotation = Quat::from_axis_angle(forward, -controller.rotation_speed * delta);
+        let origin = Vec3::ZERO;
+        let distance = (transform.translation - origin).length();
+        transform.rotate_around(origin, rotation);
+        // Maintain distance from origin after rotation
+        let dir = (transform.translation - origin).normalize();
+        transform.translation = origin + dir * distance;
+    }
+    if keyboard.pressed(KeyCode::PageUp) && ctrl_pressed && !alt_pressed {
+        // Ctrl+PgUp - Move camera forward
+        let forward = transform.forward();
+        transform.translation += forward * controller.movement_speed * speed_multiplier * delta;
+    }
+    if keyboard.pressed(KeyCode::PageDown) && ctrl_pressed && !alt_pressed {
+        // Ctrl+PgDown - Move camera backward
+        let backward = -transform.forward();
+        transform.translation += backward * controller.movement_speed * speed_multiplier * delta;
+    }
+    
+    // ALT + Arrow keys = Look-at target movement
+    if keyboard.pressed(KeyCode::ArrowUp) && alt_pressed && !ctrl_pressed {
+        // Alt+↑ - Move look-at target up
+        controller.look_at_target.y += controller.movement_speed * speed_multiplier * delta;
+        *transform = transform.looking_at(controller.look_at_target, Vec3::Y);
+    }
+    if keyboard.pressed(KeyCode::ArrowDown) && alt_pressed && !ctrl_pressed {
+        // Alt+↓ - Move look-at target down
+        controller.look_at_target.y -= controller.movement_speed * speed_multiplier * delta;
+        *transform = transform.looking_at(controller.look_at_target, Vec3::Y);
+    }
+    if keyboard.pressed(KeyCode::ArrowLeft) && alt_pressed && !ctrl_pressed {
+        // Alt+← - Move look-at target left
+        controller.look_at_target.x -= controller.movement_speed * speed_multiplier * delta;
+        *transform = transform.looking_at(controller.look_at_target, Vec3::Y);
+    }
+    if keyboard.pressed(KeyCode::ArrowRight) && alt_pressed && !ctrl_pressed {
+        // Alt+→ - Move look-at target right
+        controller.look_at_target.x += controller.movement_speed * speed_multiplier * delta;
+        *transform = transform.looking_at(controller.look_at_target, Vec3::Y);
+    }
+    if keyboard.pressed(KeyCode::PageUp) && alt_pressed && !ctrl_pressed {
+        // Alt+PgUp - Move look-at target forward (away from camera)
+        controller.look_at_target.z += controller.movement_speed * speed_multiplier * delta;
+        *transform = transform.looking_at(controller.look_at_target, Vec3::Y);
+    }
+    if keyboard.pressed(KeyCode::PageDown) && alt_pressed && !ctrl_pressed {
+        // Alt+PgDown - Move look-at target backward (toward camera)
+        controller.look_at_target.z -= controller.movement_speed * speed_multiplier * delta;
+        *transform = transform.looking_at(controller.look_at_target, Vec3::Y);
+    }
+    
+    // Arrow keys (no modifier) = Model rotation around look_at_target
+    // IMPORTANT: Model rotation must be COMPLETELY DISABLED when camera movement is active
+    
+    // Re-check modifier keys to ensure they're current
+    let ctrl_currently_pressed = keyboard.pressed(KeyCode::ControlLeft) || keyboard.pressed(KeyCode::ControlRight);
+    let alt_currently_pressed = keyboard.pressed(KeyCode::AltLeft) || keyboard.pressed(KeyCode::AltRight);
+    
+    // ABSOLUTELY NO model rotation if camera movement is active
+    if !camera_movement_active && keyboard.pressed(KeyCode::ArrowUp) && !ctrl_currently_pressed && !alt_currently_pressed {
+        // ↑ - Rotate model forward around X-axis (pitch)
         let rotation = Quat::from_rotation_x(-controller.rotation_speed * speed_multiplier * delta);
         model_rotation.rotation = rotation * model_rotation.rotation;
     }
-    if keyboard.pressed(KeyCode::KeyS) {
-        // S - Rotate model backward around X-axis
+    if !camera_movement_active && keyboard.pressed(KeyCode::ArrowDown) && !ctrl_currently_pressed && !alt_currently_pressed {
+        // ↓ - Rotate model backward around X-axis (pitch)
         let rotation = Quat::from_rotation_x(controller.rotation_speed * speed_multiplier * delta);
         model_rotation.rotation = rotation * model_rotation.rotation;
     }
-    if keyboard.pressed(KeyCode::KeyA) {
-        // A - Rotate model left around Y-axis
+    if !camera_movement_active && keyboard.pressed(KeyCode::ArrowLeft) && !ctrl_currently_pressed && !alt_currently_pressed {
+        // ← - Rotate model left around Y-axis (yaw)
         let rotation = Quat::from_rotation_y(controller.rotation_speed * speed_multiplier * delta);
         model_rotation.rotation = rotation * model_rotation.rotation;
     }
-    if keyboard.pressed(KeyCode::KeyD) {
-        // D - Rotate model right around Y-axis
+    if !camera_movement_active && keyboard.pressed(KeyCode::ArrowRight) && !ctrl_currently_pressed && !alt_currently_pressed {
+        // → - Rotate model right around Y-axis (yaw)
         let rotation = Quat::from_rotation_y(-controller.rotation_speed * speed_multiplier * delta);
         model_rotation.rotation = rotation * model_rotation.rotation;
     }
-
-    // Arrow keys - Camera movement (only if CTRL is not pressed)
-    if !(keyboard.pressed(KeyCode::ControlLeft) || keyboard.pressed(KeyCode::ControlRight)) {
-        if keyboard.pressed(KeyCode::ArrowUp) {
-            // Move camera up
-            transform.translation += Vec3::Y * controller.movement_speed * speed_multiplier * delta;
-        }
-        if keyboard.pressed(KeyCode::ArrowDown) {
-            // Move camera down
-            transform.translation -= Vec3::Y * controller.movement_speed * speed_multiplier * delta;
-        }
-        if keyboard.pressed(KeyCode::ArrowLeft) {
-            // Move camera left
-            let left = -transform.right();
-            transform.translation += left * controller.movement_speed * speed_multiplier * delta;
-        }
-        if keyboard.pressed(KeyCode::ArrowRight) {
-            // Move camera right
-            let right = transform.right();
-            transform.translation += right * controller.movement_speed * speed_multiplier * delta;
-        }
+    if keyboard.pressed(KeyCode::PageUp) && !ctrl_currently_pressed && !alt_currently_pressed {
+        // PgUp - Rotate model around Z-axis (roll)
+        let rotation = Quat::from_rotation_z(controller.rotation_speed * speed_multiplier * delta);
+        model_rotation.rotation = rotation * model_rotation.rotation;
+    }
+    if keyboard.pressed(KeyCode::PageDown) && !ctrl_currently_pressed && !alt_currently_pressed {
+        // PgDown - Rotate model around Z-axis (roll, opposite)
+        let rotation = Quat::from_rotation_z(-controller.rotation_speed * speed_multiplier * delta);
+        model_rotation.rotation = rotation * model_rotation.rotation;
     }
 
-    // CTRL + Arrow keys - Look-at target adjustment
-    if keyboard.pressed(KeyCode::ControlLeft) || keyboard.pressed(KeyCode::ControlRight) {
-        if keyboard.pressed(KeyCode::ArrowUp) {
-            // Look up
-            controller.look_at_target.y += controller.movement_speed * speed_multiplier * delta;
-        }
-        if keyboard.pressed(KeyCode::ArrowDown) {
-            // Look down
-            controller.look_at_target.y -= controller.movement_speed * speed_multiplier * delta;
-        }
-        if keyboard.pressed(KeyCode::ArrowLeft) {
-            // Look left
-            controller.look_at_target.x -= controller.movement_speed * speed_multiplier * delta;
-        }
-        if keyboard.pressed(KeyCode::ArrowRight) {
-            // Look right
-            controller.look_at_target.x += controller.movement_speed * speed_multiplier * delta;
-        }
-    }
-
-    // Use Page Up/Page Down and +/- keys for zoom
+    // ZOOM (NumPad +/- and +/- keys only, no Page Up/Down to avoid conflicts)
     // Note: + key requires checking both Equal key and Shift modifier
     let plus_pressed = keyboard.pressed(KeyCode::Equal) && 
                       (keyboard.pressed(KeyCode::ShiftLeft) || keyboard.pressed(KeyCode::ShiftRight));
-    if keyboard.pressed(KeyCode::PageUp) || keyboard.pressed(KeyCode::NumpadAdd) || plus_pressed {
+    if keyboard.pressed(KeyCode::NumpadAdd) || plus_pressed {
         // Zoom in
         let forward = (controller.look_at_target - transform.translation).normalize();
         transform.translation += forward * controller.zoom_speed * speed_multiplier * delta;
     }
-    if keyboard.pressed(KeyCode::PageDown) || keyboard.pressed(KeyCode::NumpadSubtract) || 
-       keyboard.pressed(KeyCode::Minus) {
+    if keyboard.pressed(KeyCode::NumpadSubtract) || keyboard.pressed(KeyCode::Minus) {
         // Zoom out
         let forward = (controller.look_at_target - transform.translation).normalize();
         transform.translation -= forward * controller.zoom_speed * speed_multiplier * delta;
@@ -1199,9 +1324,10 @@ fn update_camera(
             let mut max_bounds = Vec3::splat(f32::NEG_INFINITY);
             
             // Check triangles
+            let pivot = controller.look_at_target;
             for (_, (vertices, _)) in &mesh_data.triangles {
                 for vertex in vertices {
-                    let rotated_vertex = model_rotation.rotation * (*vertex);
+                    let rotated_vertex = model_rotation.rotation * ((*vertex) - pivot) + pivot;
                     min_bounds = min_bounds.min(rotated_vertex);
                     max_bounds = max_bounds.max(rotated_vertex);
                 }
@@ -1209,8 +1335,8 @@ fn update_camera(
             
             // Check bone positions
             for (_, bone_pos) in &mesh_data.positions {
-                let rotated_start = model_rotation.rotation * bone_pos.start;
-                let rotated_end = model_rotation.rotation * bone_pos.end;
+                let rotated_start = model_rotation.rotation * (bone_pos.start - pivot) + pivot;
+                let rotated_end = model_rotation.rotation * (bone_pos.end - pivot) + pivot;
                 min_bounds = min_bounds.min(rotated_start);
                 max_bounds = max_bounds.max(rotated_start);
                 min_bounds = min_bounds.min(rotated_end);
@@ -1248,44 +1374,14 @@ fn update_camera(
 fn keyboard_input(
     keyboard: Res<ButtonInput<KeyCode>>,
     mut show_axes: ResMut<ShowAxes>,
-    mut camera_query: Query<&mut Transform, With<Camera>>,
-    time: Res<Time>,
     _commands: Commands,
 ) {
     if keyboard.just_pressed(KeyCode::KeyG) {
         show_axes.0 = !show_axes.0;
     }
     
-    // Camera rotation with arrow keys and X/Y/Z keys
-    if let Ok(mut transform) = camera_query.get_single_mut() {
-        let rotation_speed = 1.0; // radians per second
-        let delta = time.delta_seconds();
-        let origin = Vec3::ZERO;
-        
-        // Store current distance from origin
-        let distance = (transform.translation - origin).length();
-        
-        // Arrow key rotation removed - now handled in update_camera
-        
-        
-        // Z-axis rotation (roll) - X and Z keys
-        if keyboard.pressed(KeyCode::KeyX) {
-            let forward: Vec3 = (*transform.forward()).into();
-            let rotation = Quat::from_axis_angle(forward, rotation_speed * delta);
-            transform.rotate_around(origin, rotation);
-        }
-        if keyboard.pressed(KeyCode::KeyZ) {
-            let forward: Vec3 = (*transform.forward()).into();
-            let rotation = Quat::from_axis_angle(forward, -rotation_speed * delta);
-            transform.rotate_around(origin, rotation);
-        }
-        
-        // Maintain distance from origin after any rotation
-        if keyboard.pressed(KeyCode::KeyX) || keyboard.pressed(KeyCode::KeyZ) {
-            let dir = (transform.translation - origin).normalize();
-            transform.translation = origin + dir * distance;
-        }
-    }
+    // All camera controls are now handled in update_camera function
+    // This function only handles non-camera related keyboard input
 }
 
 fn handle_character_zoom(
@@ -1375,20 +1471,15 @@ fn update_triangle_meshes(
     settings: Res<VisualizationSettings>,
     mut triangle_handles: ResMut<TriangleMeshHandles>,
     model_rotation: Res<ModelRotation>,
+    camera_query: Query<&CameraController>,
 ) {
-    println!("[TRIANGLE SYSTEM] update_triangle_meshes called");
-    
     // Check if mesh_data is available and triangles should be shown
     let Some(mesh_data) = mesh_data else {
-        println!("[TRIANGLE SYSTEM] No mesh data available");
         return;
     };
     
-    println!("[TRIANGLE SYSTEM] show_triangles: {}, triangles count: {}", settings.show_triangles, mesh_data.triangles.len());
-    
     // Only update if there are triangles to show and the setting is enabled
     if !settings.show_triangles || mesh_data.triangles.is_empty() {
-        println!("[TRIANGLE SYSTEM] Clearing triangles - show_triangles: {}, is_empty: {}", settings.show_triangles, mesh_data.triangles.is_empty());
         // Clear existing triangle meshes if triangles are disabled
         for entity in triangle_handles.handles.drain(..) {
             commands.entity(entity).despawn();
@@ -1397,9 +1488,9 @@ fn update_triangle_meshes(
     }
 
     // Check if we need to update triangles (either no triangles exist or mesh data changed)
-    let needs_update = triangle_handles.handles.is_empty() || mesh_data.is_changed() || model_rotation.is_changed();
+    // Note: We don't check model_rotation.is_changed() because rotation is handled by transform in rendering
+    let needs_update = triangle_handles.handles.is_empty() || mesh_data.is_changed();
     
-    println!("[TRIANGLE SYSTEM] needs_update: {}, handles_empty: {}, data_changed: {}", needs_update, triangle_handles.handles.is_empty(), mesh_data.is_changed());
     
     if !needs_update {
         return;
@@ -1410,31 +1501,19 @@ fn update_triangle_meshes(
         commands.entity(entity).despawn();
     }
 
-    println!("TRIANGLE DEBUG: MeshData contains {} triangles, {} skin vertices, {} positions", 
-             mesh_data.triangles.len(), mesh_data.skin_vertex_positions.len(), mesh_data.positions.len());
-                 
-    // Print the first few triangles for debugging
-    for (name, (vertices, color)) in mesh_data.triangles.iter().take(3) {
-        println!("TRIANGLE FOUND: '{}' with vertices at: [{:?}, {:?}, {:?}], color: {:?}", 
-                 name, vertices[0], vertices[1], vertices[2], color);
-    }
-    
-    println!("UPDATING: Creating {} triangle meshes", mesh_data.triangles.len());
 
     // Create triangle meshes
     for (i, (name, (vertices, color))) in mesh_data.triangles.iter().enumerate() {
-            println!("MESH: Creating triangle mesh '{}'", name);
             
-            println!("[MESH CREATE] Creating mesh for triangle '{}' with vertices: {:?}, {:?}, {:?}, color: {:?}", 
-                     name, vertices[0], vertices[1], vertices[2], color);
                      
             // Create a mesh for this triangle
             let mut mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default());
             
-            // Apply model rotation to triangle vertices
-            let rotated_v0 = model_rotation.rotation * vertices[0];
-            let rotated_v1 = model_rotation.rotation * vertices[1];
-            let rotated_v2 = model_rotation.rotation * vertices[2];
+            // Apply model rotation to triangle vertices around look_at_target
+            let pivot = camera_query.single().look_at_target;
+            let rotated_v0 = model_rotation.rotation * (vertices[0] - pivot) + pivot;
+            let rotated_v1 = model_rotation.rotation * (vertices[1] - pivot) + pivot;
+            let rotated_v2 = model_rotation.rotation * (vertices[2] - pivot) + pivot;
             
             // Set vertex positions (just the 3 vertices)
             mesh.insert_attribute(
@@ -1481,13 +1560,11 @@ fn update_triangle_meshes(
             
             // Spawn the mesh entity
             let mesh_handle = meshes.add(mesh);
-            println!("[MESH SPAWN] About to spawn triangle '{}' with PbrBundle", name);
             let entity = commands.spawn(PbrBundle {
                 mesh: mesh_handle,
                 material: triangle_material,
                 ..default()
             }).id();
-            println!("[MESH SPAWN] Triangle '{}' spawned with entity ID {:?}", name, entity);
             
             // Store the entity handle for cleanup later
             triangle_handles.handles.push(entity);
@@ -1499,13 +1576,15 @@ fn draw_bones(
     mesh_data: Option<Res<MeshData>>,
     _settings: Res<VisualizationSettings>,
     model_rotation: Res<ModelRotation>,
+    camera_query: Query<&CameraController>,
 ) {
     if let Some(mesh_data) = mesh_data {
         // Draw bones
+        let pivot = camera_query.single().look_at_target;
         for bone in mesh_data.positions.values() {
-            // Apply model rotation to bone positions
-            let rotated_start = model_rotation.rotation * bone.start;
-            let rotated_end = model_rotation.rotation * bone.end;
+            // Apply model rotation to bone positions around look_at_target
+            let rotated_start = model_rotation.rotation * (bone.start - pivot) + pivot;
+            let rotated_end = model_rotation.rotation * (bone.end - pivot) + pivot;
             gizmos.line(
                 rotated_start,
                 rotated_end,
@@ -1515,8 +1594,8 @@ fn draw_bones(
         
         // Draw bone end positions as arrow markers to indicate direction
         for bone in mesh_data.positions.values() {
-            let rotated_start = model_rotation.rotation * bone.start;
-            let rotated_end = model_rotation.rotation * bone.end;
+            let rotated_start = model_rotation.rotation * (bone.start - pivot) + pivot;
+            let rotated_end = model_rotation.rotation * (bone.end - pivot) + pivot;
             let bone_direction = (rotated_end - rotated_start).normalize();
             let bone_color = Color::rgb(bone.color.0[0], bone.color.0[1], bone.color.0[2]);
             
@@ -1538,8 +1617,8 @@ fn draw_bones(
         
         // Draw skin vertices as spheres
         for (i, (position, color, _, _)) in mesh_data.skin_vertex_positions.iter().enumerate() {
-            // Apply model rotation to vertex position
-            let rotated_position = model_rotation.rotation * (*position);
+            // Apply model rotation to vertex position around look_at_target
+            let rotated_position = model_rotation.rotation * ((*position) - pivot) + pivot;
             let sphere_radius = 0.0025; // Size of the sphere (half of previous 0.005)
             gizmos.sphere(
                 rotated_position,
@@ -1556,14 +1635,11 @@ fn draw_triangles(
     mesh_data: Option<Res<MeshData>>,
     settings: Res<VisualizationSettings>,
     model_rotation: Res<ModelRotation>,
+    camera_query: Query<&CameraController>,
 ) {
-    // Debug the triangle visibility settings
-    println!("[DRAW TRIANGLES] mesh_data.is_some()={}, settings.show_triangles={}", 
-             mesh_data.is_some(), settings.show_triangles);
              
     // For debugging purposes, always draw triangles regardless of settings
     if mesh_data.is_none() {
-        println!("[DRAW TRIANGLES] No mesh data available - cannot draw triangles");
         return;
     }
     
@@ -1578,10 +1654,11 @@ fn draw_triangles(
                 TriangleOutlineMode::Matching => Color::rgba(fill_color[0], fill_color[1], fill_color[2], 1.0), // Full opacity
             };
             
-            // Apply model rotation to triangle vertices
-            let rotated_v0 = model_rotation.rotation * vertices[0];
-            let rotated_v1 = model_rotation.rotation * vertices[1];
-            let rotated_v2 = model_rotation.rotation * vertices[2];
+            // Apply model rotation to triangle vertices around look_at_target
+            let pivot = camera_query.single().look_at_target;
+            let rotated_v0 = model_rotation.rotation * (vertices[0] - pivot) + pivot;
+            let rotated_v1 = model_rotation.rotation * (vertices[1] - pivot) + pivot;
+            let rotated_v2 = model_rotation.rotation * (vertices[2] - pivot) + pivot;
             
             // Draw the triangle outline
             gizmos.line(rotated_v0, rotated_v1, outline_color);
@@ -1591,7 +1668,7 @@ fn draw_triangles(
     }
 }
 
-fn draw_axes(mut gizmos: Gizmos, show_axes: Res<ShowAxes>, model_rotation: Res<ModelRotation>) {
+fn draw_axes(mut gizmos: Gizmos, show_axes: Res<ShowAxes>, model_rotation: Res<ModelRotation>, camera_query: Query<&CameraController>) {
     if !show_axes.0 {
         return;
     }
@@ -1607,13 +1684,14 @@ fn draw_axes(mut gizmos: Gizmos, show_axes: Res<ShowAxes>, model_rotation: Res<M
         let color = Color::rgba(0.5, 0.5, 0.5, alpha);
 
         // X-parallel lines
-        let start_x = model_rotation.rotation * Vec3::new(-grid_extent, 0.0, offset);
-        let end_x = model_rotation.rotation * Vec3::new(grid_extent, 0.0, offset);
+        let pivot = camera_query.single().look_at_target;
+        let start_x = model_rotation.rotation * (Vec3::new(-grid_extent, 0.0, offset) - pivot) + pivot;
+        let end_x = model_rotation.rotation * (Vec3::new(grid_extent, 0.0, offset) - pivot) + pivot;
         gizmos.line(start_x, end_x, color);
 
         // Z-parallel lines
-        let start_z = model_rotation.rotation * Vec3::new(offset, 0.0, -grid_extent);
-        let end_z = model_rotation.rotation * Vec3::new(offset, 0.0, grid_extent);
+        let start_z = model_rotation.rotation * (Vec3::new(offset, 0.0, -grid_extent) - pivot) + pivot;
+        let end_z = model_rotation.rotation * (Vec3::new(offset, 0.0, grid_extent) - pivot) + pivot;
         gizmos.line(start_z, end_z, color);
     }
 }
@@ -1625,6 +1703,7 @@ fn update_ui(
     camera_query: Query<(&Camera, &GlobalTransform), With<Camera>>,
     _windows: Query<&Window>,
     model_rotation: Res<ModelRotation>,
+    camera_controller_query: Query<&CameraController>,
 ) {
     let ctx = contexts.ctx_mut();
 
@@ -1691,7 +1770,8 @@ fn update_ui(
             .filter_map(|(path, bone)| {
                 let name = path.split('.').last()?;
                 let center = bone.start.lerp(bone.end, 0.5);
-                let rotated_center = model_rotation.rotation * center;
+                let pivot = camera_controller_query.single().look_at_target;
+                let rotated_center = model_rotation.rotation * (center - pivot) + pivot;
                 let screen_pos = camera.world_to_viewport(camera_transform, rotated_center)?;
                 Some((name.to_string(), screen_pos))
             })
@@ -1718,7 +1798,8 @@ fn update_ui(
                 let id = id.as_ref()?;
                 // Extract just the last part of the ID (after the last dot)
                 let name = id.split('.').last().unwrap_or(id);
-                let rotated_position = model_rotation.rotation * (*position);
+                let pivot = camera_controller_query.single().look_at_target;
+                let rotated_position = model_rotation.rotation * ((*position) - pivot) + pivot;
                 let screen_pos = camera.world_to_viewport(camera_transform, rotated_position)?;
                 Some((name.to_string(), screen_pos))
             })
