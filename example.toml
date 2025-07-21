@@ -1,4 +1,7 @@
 [body]
+waist = 0.1
+lower_waist = "{{ waist + 0.05 }}"
+super_waist = "{{ lower_waist + 0.02 }}"
 
 [body.lower_spine]
 len = 0.20
@@ -6,12 +9,12 @@ orient = 0
 slope = 90
 rot = 0
 
-[body.lower_spine.skin_verts]
+[body.lower_spine.verts]
 # Vertices with IDs but no triangle references
-ls1 = { frac = 0.0, dist = 0.1, rot = 180 }
-ls2 = { frac = 0.0, dist = 0.15, rot = 240 }
-ls3 = { frac = 0.4, dist = 0.1, rot = 180 }
-ls4 = { frac = 0.4, dist = 0.15, rot = 240 }
+ls1 = { frac = 0.0, dist = "{{waist}}", rot = 180 }
+ls2 = { frac = 0.0, dist = "{{lower_waist}}", rot = 240 }
+ls3 = { frac = 0.4, dist = "{{waist}}", rot = 180 }
+ls4 = { frac = 0.4, dist = "{{super_waist}}", rot = 240 }
 
 # Triangle definitions referencing vertex IDs
 [body.lower_spine.triangles]

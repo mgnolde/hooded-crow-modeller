@@ -3,6 +3,7 @@ use bevy::prelude::*;
 use std::collections::{HashMap, HashSet};
 use std::error::Error;
 use serde::{Deserialize, Serialize};
+use minijinja::{Environment, context};
 
 #[derive(Debug, Clone, Deserialize, Serialize, Resource)]
 pub struct Model(pub HashMap<String, Group>);
@@ -261,7 +262,14 @@ impl Model {
     }
     
     pub fn from_toml(input: &str) -> Result<Self, Box<dyn Error>> {
-        let toml_data = input.parse::<toml::Value>()?;
+        // Parse TOML to extract variables and process templates
+        let mut toml_data = input.parse::<toml::Value>()?;
+        
+        // Extract and resolve all variables from [body] section (including derived ones)
+        let variables = Self::extract_and_resolve_variables(&mut toml_data)?;
+        
+        // Process templates in the entire TOML structure
+        Self::process_templates(&mut toml_data, &variables)?;
         let root = toml_data.as_table().unwrap_or_else(|| Self::empty_table());
 
         println!("[MODEL] Parsing TOML data into model");
@@ -617,7 +625,7 @@ impl Model {
                     slope,
                     rotation,
                     // Parse skin verts if available
-                    skin_verts: if let Some(skin_verts_value) = table.get("skin_verts") {
+                    skin_verts: if let Some(skin_verts_value) = table.get("verts").or_else(|| table.get("skin_verts")) {
                         parse_skin_verts(skin_verts_value)
                     } else {
                         Vec::new()
@@ -637,7 +645,7 @@ impl Model {
                 bone.resolve_values(parent_bone);
                 
                 // Extract color values from skin vertices
-                if let Some(skin_verts_value) = table.get("skin_verts") {
+                if let Some(skin_verts_value) = table.get("verts").or_else(|| table.get("skin_verts")) {
                     if let Some(skin_verts_array) = skin_verts_value.as_array() {
                         for skin_vert in skin_verts_array {
                             if let Some(color) = skin_vert.get("color")
@@ -668,7 +676,7 @@ impl Model {
                        key == "orientation" || key == "orient" || 
                        key == "slope" || 
                        key == "rotation" || key == "rot" || 
-                       key == "skin_verts" || 
+                       key == "skin_verts" || key == "verts" || 
                        key == "triangles" || 
                        key == "color" || key == "col" {
                         continue;
@@ -973,6 +981,122 @@ impl Model {
 
 
 // Triangle struct moved to before impl Model block
+
+    fn extract_and_resolve_variables(toml_data: &mut toml::Value) -> Result<HashMap<String, f64>, Box<dyn Error>> {
+        let mut variables = HashMap::new();
+        let mut pending_variables = HashMap::new();
+        
+        // Get the [body] section
+        if let Some(body_table) = toml_data.get_mut("body").and_then(|b| b.as_table_mut()) {
+            // First pass: collect direct numeric values and template strings
+            for (key, value) in body_table.iter() {
+                match value {
+                    toml::Value::Float(f) => {
+                        variables.insert(key.clone(), *f);
+                    }
+                    toml::Value::Integer(i) => {
+                        variables.insert(key.clone(), *i as f64);
+                    }
+                    toml::Value::String(s) if s.starts_with("{{") && s.ends_with("}}") => {
+                        pending_variables.insert(key.clone(), s.clone());
+                    }
+                    _ => {} // Skip other types
+                }
+            }
+            
+            // Multi-pass resolution of template variables
+            let max_passes = 10; // Prevent infinite loops
+            for pass in 0..max_passes {
+                let mut resolved_this_pass = false;
+                let mut still_pending = HashMap::new();
+                
+                for (var_name, template_str) in pending_variables {
+                    let template_content = &template_str[2..template_str.len()-2].trim();
+                    
+                    if let Ok(result) = Self::evaluate_expression(template_content, &variables) {
+                        variables.insert(var_name.clone(), result);
+                        
+                        // Update the TOML data with the resolved value
+                        body_table.insert(var_name, toml::Value::Float(result));
+                        resolved_this_pass = true;
+                    } else {
+                        still_pending.insert(var_name, template_str);
+                    }
+                }
+                
+                pending_variables = still_pending;
+                
+                // If no variables were resolved this pass, we're done
+                if !resolved_this_pass || pending_variables.is_empty() {
+                    break;
+                }
+            }
+            
+            // Report any unresolved variables
+            if !pending_variables.is_empty() {
+                eprintln!("Warning: Could not resolve template variables: {:?}", pending_variables.keys().collect::<Vec<_>>());
+            }
+        }
+        
+        Ok(variables)
+    }
+
+    fn process_templates(value: &mut toml::Value, variables: &HashMap<String, f64>) -> Result<(), Box<dyn Error>> {
+        use toml::Value;
+        
+        match value {
+            Value::Table(table) => {
+                for (_, v) in table.iter_mut() {
+                    Self::process_templates(v, variables)?;
+                }
+            }
+            Value::Array(array) => {
+                for v in array.iter_mut() {
+                    Self::process_templates(v, variables)?;
+                }
+            }
+            Value::String(s) => {
+                // Check if this is a template string
+                if s.starts_with("{{") && s.ends_with("}}") {
+                    let template_content = &s[2..s.len()-2].trim();
+                    
+                    // Simple expression evaluation
+                    if let Ok(result) = Self::evaluate_expression(template_content, variables) {
+                        *value = Value::Float(result);
+                    }
+                }
+            }
+            _ => {} // Numbers, booleans, etc. don't need processing
+        }
+        Ok(())
+    }
+    
+    fn evaluate_expression(expr: &str, variables: &HashMap<String, f64>) -> Result<f64, Box<dyn Error>> {
+        let expr = expr.trim();
+        
+        // Simple variable lookup
+        if let Some(&value) = variables.get(expr) {
+            return Ok(value);
+        }
+        
+        // Simple addition expression: "waist + 0.05"
+        if let Some(plus_pos) = expr.find(" + ") {
+            let left = expr[..plus_pos].trim();
+            let right = expr[plus_pos + 3..].trim();
+            
+            let left_val = if let Some(&val) = variables.get(left) {
+                val
+            } else {
+                left.parse::<f64>()?
+            };
+            
+            let right_val = right.parse::<f64>()?;
+            return Ok(left_val + right_val);
+        }
+        
+        // Try to parse as direct number
+        expr.parse::<f64>().map_err(|e| e.into())
+    }
 
 // Helper function to convert HSV to RGB
 fn hsv_to_rgb(h: f32, s: f32, v: f32) -> (f32, f32, f32) {
