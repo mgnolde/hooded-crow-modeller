@@ -72,7 +72,6 @@ pub struct SkinVert {
 
 impl Default for SkinVert {
     fn default() -> Self {
-        eprintln!("[SKINVERT DEBUG] SkinVert::default() called. Creating default SkinVert: frac=0.5, dist=0.0, rot=0.0");
         Self {
             frac: 0.5,  // Default to middle of the bone
             distance: 0.0,        // Default to on the bone
@@ -87,8 +86,6 @@ impl Default for SkinVert {
 impl SkinVert {
     /// Calculate the position of this skin vertex relative to the bone
     pub fn calculate_position(&self, bone_start: Vec3, bone_end: Vec3, bone_rotation: f32) -> Vec3 {
-        eprintln!("[SKINVERT DEBUG] CALC_POS for SV id: {:?}, frac: {}, dist: {}, sv_rot: {}", self.id, self.frac, self.distance, self.rotation);
-        eprintln!("[SKINVERT DEBUG]   CALC_POS inputs: bone_start: {:?}, bone_end: {:?}, bone_rotation (deg): {}", bone_start, bone_end, bone_rotation);
         // Calculate the direction of the bone
         let bone_direction = (bone_end - bone_start).normalize();
         let bone_length = (bone_end - bone_start).length();
@@ -118,13 +115,7 @@ impl SkinVert {
         // Calculate the offset from the bone in the perpendicular plane
         let offset = perp1 * self.distance * combined_angle_rad.cos() +
                      perp2 * self.distance * combined_angle_rad.sin();
-        eprintln!("[SKINVERT DEBUG]   CALC_POS intermediates: bone_direction: {:?}, bone_length: {}", bone_direction, bone_length);
-        eprintln!("[SKINVERT DEBUG]   CALC_POS segment_position (on bone): {:?}", segment_position);
-        eprintln!("[SKINVERT DEBUG]   CALC_POS perp1: {:?}, perp2: {:?}", perp1, perp2);
-        eprintln!("[SKINVERT DEBUG]   CALC_POS combined_angle_rad: {:.4} (sv_rot {} + bone_rot {}) -> total_deg: {}", combined_angle_rad, self.rotation, bone_rotation, self.rotation + bone_rotation);
-        eprintln!("[SKINVERT DEBUG]   CALC_POS offset_vector: {:?}", offset);
         let final_position = segment_position + offset;
-        eprintln!("[SKINVERT DEBUG]   CALC_POS final_position: {:?}", final_position);
         // Final position is the base position plus the offset
         final_position
     }
@@ -272,25 +263,18 @@ impl Model {
         Self::process_templates(&mut toml_data, &variables)?;
         let root = toml_data.as_table().unwrap_or_else(|| Self::empty_table());
 
-        println!("[MODEL] Parsing TOML data into model");
-        println!("[MODEL] Root keys: {:?}", root.keys().collect::<Vec<_>>());
 
         // Recursive function to find triangles in nested structures
         fn find_triangle_tables(prefix: &str, table: &toml::value::Table) {
             // First check if this table has a triangles key
             if table.contains_key("triangles") {
-                println!("[MODEL] Found triangles key in {}", prefix);
                 if let Some(triangles_table) = table.get("triangles").and_then(|t| t.as_table()) {
-                    println!("[MODEL] Triangle table in {} contains {} entries: {:?}", 
-                            prefix, triangles_table.len(), triangles_table.keys().collect::<Vec<_>>());
                     
                     // Examine each triangle definition
                     for (triangle_name, triangle_data) in triangles_table {
                         if let Some(tri_table) = triangle_data.as_table() {
                             if let Some(verts_value) = tri_table.get("verts") {
                                 if let Some(verts_array) = verts_value.as_array() {
-                                    println!("[MODEL] Triangle '{}' has vertices: {:?}", 
-                                        triangle_name, verts_array.iter().map(|v| v.as_str().unwrap_or("")).collect::<Vec<_>>());
                                 }
                             }
                         }
@@ -328,63 +312,43 @@ impl Model {
         }
 
         fn parse_triangles(table: &toml::value::Table) -> HashMap<String, TriangleDefinition> {
-            println!("[TRIANGLE PARSE] Searching for triangles in table with keys: {:?}", table.keys().collect::<Vec<_>>());
             if let Some(triangles_value) = table.get("triangles") {
-                println!("[TRIANGLE PARSE] Found 'triangles' key in table with type: {:?}", triangles_value.type_str());
                 if let Some(triangles_table) = triangles_value.as_table() {
-                    println!("[TRIANGLE PARSE] 'triangles' is a table with {} entries: {:?}", 
-                       triangles_table.len(), triangles_table.keys().collect::<Vec<_>>());
                     let mut triangle_defs = HashMap::new();
 
                     // Process each triangle definition
                     for (triangle_name, tri_value) in triangles_table {
-                        println!("[TRIANGLE PARSE] Processing triangle '{}' with type: {:?}", triangle_name, tri_value.type_str());
                         
                         // Triangle should have verts key
                         if let Some(verts_value) = tri_value.get("verts") {
-                            println!("[TRIANGLE PARSE] Found 'verts' key for triangle '{}' with type: {:?}", 
-                                triangle_name, verts_value.type_str());
                             
                             let mut verts = Vec::new();
                             if let Some(verts_array) = verts_value.as_array() {
                                 // Verts as array: verts = ["v1", "v2", "v3"]
-                                println!("[TRIANGLE PARSE] 'verts' is an array with {} elements", verts_array.len());
                                 for (i, vert) in verts_array.iter().enumerate() {
                                     if let Some(id) = vert.as_str() {
-                                        println!("[TRIANGLE PARSE] Adding vertex ID from array[{}]: {}", i, id);
                                         verts.push(id.to_string());
                                     } else {
-                                        println!("[TRIANGLE PARSE] Warning: vertex at index {} is not a string: {:?}", i, vert);
                                     }
                                 }
                             } else if let Some(verts_table) = verts_value.as_table() {
                                 // Verts as table: verts = { "0" = "v1", "1" = "v2", "2" = "v3" }
-                                println!("[TRIANGLE PARSE] 'verts' is a table with {} entries", verts_table.len());
                                 for (idx, vert_id) in verts_table {
                                     if let Some(id) = vert_id.as_str() {
-                                        println!("[TRIANGLE PARSE] Adding vertex ID from table[{}]: {}", idx, id);
                                         verts.push(id.to_string());
                                     } else {
-                                        println!("[TRIANGLE PARSE] Warning: vertex with index {} is not a string: {:?}", idx, vert_id);
                                     }
                                 }
                             } else {
-                                println!("[TRIANGLE PARSE] Warning: 'verts' is neither an array nor a table, type is: {:?}", verts_value.type_str());
                             }
                             
-                            println!("[TRIANGLE PARSE] Triangle '{}' has {} vertices: {:?}", 
-                                triangle_name, verts.len(), verts);
                             
                             // Get optional color
                             let mut color = None;
                             let color_value_long = tri_value.get("color");
                             let color_value_short = tri_value.get("col");
-                            println!("[TRIANGLE PARSE] Triangle '{}' color keys: long={:?}, short={:?}", 
-                                triangle_name, color_value_long.is_some(), color_value_short.is_some());
                             
                             if let Some(color_value) = color_value_long.or(color_value_short) {
-                                println!("[TRIANGLE PARSE] Found color for triangle '{}' with type: {:?}", 
-                                    triangle_name, color_value.type_str());
                                 if let Some(color_array) = color_value.as_array() {
                                     color = Some([
                                         color_array[0].as_float().unwrap_or(0.7) as f32,
@@ -392,21 +356,15 @@ impl Model {
                                         color_array[2].as_float().unwrap_or(0.7) as f32,
                                         color_array.get(3).and_then(|c| c.as_float()).unwrap_or(0.5) as f32
                                     ]);
-                                    println!("[TRIANGLE PARSE] Triangle '{}' has color: RGBA({:.1},{:.1},{:.1},{:.1})", 
-                                triangle_name, color.unwrap()[0], color.unwrap()[1], color.unwrap()[2], color.unwrap()[3]);
                                 }
                             } else {
-                                println!("[TRIANGLE PARSE] Triangle '{}' has default color (semi-transparent gray)", triangle_name);
                             }
                             
-                            println!("[TRIANGLE PARSE] Adding triangle '{}' with vertices: {:?}", triangle_name, verts);
                             triangle_defs.insert(triangle_name.clone(), TriangleDefinition { verts, color });
                         }
                     }
-                    println!("[TRIANGLE PARSE] Total triangles parsed: {}", triangle_defs.len());
                     if !triangle_defs.is_empty() {
-                        println!("[TRIANGLE PARSE] Triangle definitions: {:?}", 
-                            triangle_defs.iter().map(|(k, v)| (k.clone(), v.verts.clone())).collect::<HashMap<_,_>>());
+                        // Triangle definitions parsed successfully
                     }
                     return triangle_defs;
                 }
@@ -492,21 +450,15 @@ impl Model {
                     // Debugging rotation parsing
                     let rot_val_long = props.get("rotation");
                     let rot_val_short = props.get("rot");
-                    eprintln!("[SKINVERT DEBUG] PARSE_SKIN_VERTS (Table Format) - id={:?}: props.get(\"rotation\") is {:?}, props.get(\"rot\") is {:?}", skin_vert.id, rot_val_long, rot_val_short);
 
                     if let Some(val) = rot_val_long.or(rot_val_short) {
-                        eprintln!("[SKINVERT DEBUG] PARSE_SKIN_VERTS (Table Format) - id={:?}: Found TOML value for rotation: {:?}", skin_vert.id, val);
                         if let Some(rotation_float) = val.as_float() {
-                            eprintln!("[SKINVERT DEBUG] PARSE_SKIN_VERTS (Table Format) - id={:?}: Successfully parsed as float: {}", skin_vert.id, rotation_float);
                             skin_vert.rotation = rotation_float as f32;
                         } else if let Some(rotation_int) = val.as_integer() {
-                            eprintln!("[SKINVERT DEBUG] PARSE_SKIN_VERTS (Table Format) - id={:?}: Parsed as integer: {}, converting to f32", skin_vert.id, rotation_int);
                             skin_vert.rotation = rotation_int as f32;
                         } else {
-                            eprintln!("[SKINVERT DEBUG] PARSE_SKIN_VERTS (Table Format) - id={:?}: FAILED to parse TOML value {:?} as float or integer", skin_vert.id, val);
                         }
                     } else {
-                        eprintln!("[SKINVERT DEBUG] PARSE_SKIN_VERTS (Table Format) - id={:?}: NEITHER \"rotation\" NOR \"rot\" key found.", skin_vert.id);
                     }
                     if let Some(weight) = props.get("weight")
                         .and_then(|v| v.as_float()) {
@@ -524,9 +476,6 @@ impl Model {
                         }
                     }
                     
-                    eprintln!("[SKINVERT DEBUG] PARSE_SKIN_VERTS (Table Format) - Parsed SkinVert: id={:?}, frac={}, dist={}, rot={}", 
-                               skin_vert.id, skin_vert.frac, skin_vert.distance, skin_vert.rotation);
-                    
                     skin_vert
                 }).collect();
                 return result;
@@ -541,25 +490,18 @@ impl Model {
             current_path: &str, 
             bones: &mut HashMap<String, Group>
         ) -> Group {
-            println!("[COLLECT BONES] Processing path: {}, table keys: {:?}", current_path, table.keys().collect::<Vec<_>>());
             
             // Check if this table has a triangles key directly
             if table.contains_key("triangles") {
-                println!("[COLLECT BONES] Found 'triangles' key at path: {}", current_path);
-                println!("[COLLECT BONES] Triangles value type: {:?}", table.get("triangles").unwrap().type_str());
                 
                 if let Some(triangles_table) = table.get("triangles").and_then(|t| t.as_table()) {
-                    println!("[COLLECT BONES] Triangles is a table with {} entries", triangles_table.len());
                     for (tri_name, tri_value) in triangles_table {
-                        println!("[COLLECT BONES] Triangle '{}' has type: {:?}", tri_name, tri_value.type_str());
                         
                         if let Some(tri_table) = tri_value.as_table() {
-                            println!("[COLLECT BONES] Triangle '{}' has keys: {:?}", 
-                                tri_name, tri_table.keys().collect::<Vec<_>>());
+                            // Triangle table found
                         }
                     }
                 } else {
-                    println!("[COLLECT BONES] Warning: 'triangles' is not a table at path: {}", current_path);
                 }
             }
             
@@ -604,19 +546,13 @@ impl Model {
                     .map(|v| v as f32);
                 
                 // Check for triangles key first
-                println!("[COLLECT BONES] Checking for triangles in bone '{}'", current_path);
                 let has_triangles = table.contains_key("triangles");
                 if has_triangles {
-                    println!("[COLLECT BONES] Found triangles key in bone '{}'", current_path);
                 }
                 
                 // Parse triangle definitions if available
                 let parsed_triangles = parse_triangles(table);
-                println!("[BONE CREATE] For bone '{}', triangle_defs count: {}", 
-                    current_path, parsed_triangles.len());
                 if !parsed_triangles.is_empty() {
-                    println!("[BONE CREATE] Triangle names in '{}': {:?}", 
-                        current_path, parsed_triangles.keys().collect::<Vec<_>>());
                 }
                 
                 let mut bone = Bone {
@@ -638,8 +574,6 @@ impl Model {
                     resolved_rotation: 0.0,
                 };
                 
-                println!("Created bone at {}: length={}, orientation={:?}, rotation={:?}", 
-                         current_path, length, orientation, rotation);
                 
                 // Resolve inherited values
                 bone.resolve_values(parent_bone);
@@ -662,8 +596,6 @@ impl Model {
                 }
                 
                 // The triangle_defs were already set when creating the bone above
-                println!("[COLLECT_BONES] Bone '{}' has {} triangle definitions", 
-                         current_path, bone.triangle_defs.len());
                 
                 current_group.bones.insert(current_path.to_string(), bone);
             }
@@ -810,7 +742,6 @@ impl Model {
 
 
     pub fn collect_triangles(&self) -> Vec<Triangle> {
-        println!("[MODEL] Collecting triangles from model with {} bones", self.get_bones().len());
         let mut triangles: Vec<Triangle> = Vec::new();
         let mut vertex_map = HashMap::new();
         
@@ -829,49 +760,30 @@ impl Model {
                     if let Some(ref id) = sv.id {
                         let pos = sv.calculate_position(*start, *end, bone.resolved_rotation);
                         total_verts += 1;
-                        println!("[TRIANGLE COLLECT] Storing vertex '{}' position {:?} from bone {}", id, pos, bone_name);
                         vertex_map.insert(id.clone(), (pos, bone_name.clone()));
                     } else {
-                        println!("[TRIANGLE COLLECT] WARNING: Skin vertex in bone '{}' has no ID and cannot be referenced by triangles", bone_name);
                     }
                 }
             }
         }
         
-        println!("[TRIANGLE COLLECT] Built vertex map with {} vertices (total processed: {})", vertex_map.len(), total_verts);
         
         // Debug print all vertex IDs in the map for reference
-        println!("[TRIANGLE COLLECT] Vertex IDs available: {:?}", vertex_map.keys().collect::<Vec<_>>());
 
-        println!("[COLLECT_TRIANGLES] Starting triangle collection...");
         
         // Debug print for bone counting
         let bone_count = self.get_bones().len();
-        println!("[COLLECT_TRIANGLES] Processing {} bones", bone_count);
         
         // Debug print all bones to see what's available
-        println!("[COLLECT_TRIANGLES] Available bones: {:?}", 
-                 self.get_bones().keys().collect::<Vec<_>>());
         
         // Iterate through all bones to collect their triangle definitions
         for (bone_name, bone) in self.get_bones() {
-            println!("[COLLECT_TRIANGLES] Processing bone '{}' with {} triangle definitions", 
-                     bone_name, bone.triangle_defs.len());
-            
-            // Debug: Print all fields of the bone to see what data it has
-            println!("[COLLECT_TRIANGLES] Bone '{}' data: triangle_defs.keys={:?}", 
-                     bone_name, 
-                     bone.triangle_defs.keys().collect::<Vec<_>>());
             
             // Process triangle_defs in the current bone
             for (triangle_name, triangle_def) in &bone.triangle_defs {
-                println!("[COLLECT_TRIANGLES] Processing triangle '{}' with {} vertex references: {:?}", 
-                         triangle_name, triangle_def.verts.len(), triangle_def.verts);
                 
                 // Skip triangles that don't have exactly 3 vertices
                 if triangle_def.verts.len() != 3 {
-                    println!("[COLLECT_TRIANGLES] Skipping triangle '{}' with {} vertices (not exactly 3)", 
-                             triangle_name, triangle_def.verts.len());
                     continue;
                 }
                 
@@ -885,9 +797,7 @@ impl Model {
                     
                     if let Some((position, bone_name)) = found_vertex {
                         vertex_positions.push(*position);
-                        println!("[COLLECT_TRIANGLES] Found vertex '{}' at position: {:?} from bone {}", vertex_id, position, bone_name);
                     } else {
-                        println!("[COLLECT_TRIANGLES] ERROR: Vertex '{}' not found in vertex_map", vertex_id);
                         all_vertices_found = false;
                         break;
                     }
@@ -901,16 +811,12 @@ impl Model {
                         bone_names: [bone_name.clone(), bone_name.clone(), bone_name.clone()],
                         color: triangle_def.color.unwrap_or([0.7, 0.7, 0.7, 0.5]),
                     });
-                    println!("[COLLECT_TRIANGLES] Added triangle '{}' with vertices: {:?}, {:?}, {:?}", 
-                             format!("{}.{}", bone_name, triangle_name), vertex_positions[0], vertex_positions[1], vertex_positions[2]);
                 } else {
-                    println!("[COLLECT_TRIANGLES] Failed to add triangle '{}' due to missing vertices", triangle_name);
                 }
             }
         }
         
         // Now also collect triangles from skin vertices (legacy triangle references)
-        println!("[COLLECT_TRIANGLES] Processing legacy triangles from {} skin vertices", self.get_bones().values().map(|b| b.skin_verts.len()).sum::<usize>());
         
         // Debug: print a few skin vertices to see what data they have
         struct LegacyVertInfo {
@@ -929,10 +835,7 @@ impl Model {
                     let pos_calc = sv.calculate_position(*start, *end, bone.resolved_rotation);
                     for (face_name, &pos_idx) in &sv.triangles {
                         if pos_idx >= 3 {
-                            eprintln!(
-                                "[TRIANGLE COLLECT] Vertex id {:?} references invalid position {} in face '{}'",
-                                sv.id, pos_idx, face_name
-                            );
+                            // Invalid position index
                             continue;
                         }
                         legacy_faces
@@ -950,11 +853,7 @@ impl Model {
         
         for (face_name, mut verts) in legacy_faces {
             if verts.len() != 3 {
-                eprintln!(
-                    "[TRIANGLE COLLECT] Legacy face '{}' has {} verts, expected 3 – skipping",
-                    face_name,
-                    verts.len()
-                );
+                // Legacy face doesn't have exactly 3 vertices, skip
                 continue;
             }
             // order vertices by their specified position index 0,1,2
@@ -974,7 +873,6 @@ impl Model {
             });
         }
 
-        eprintln!("[TRIANGLE COLLECT] Total triangles created: {}", triangles.len());
         triangles
     }
 
@@ -1034,7 +932,6 @@ impl Model {
             
             // Report any unresolved variables
             if !pending_variables.is_empty() {
-                eprintln!("Warning: Could not resolve template variables: {:?}", pending_variables.keys().collect::<Vec<_>>());
             }
         }
         

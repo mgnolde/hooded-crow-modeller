@@ -7,10 +7,11 @@ use bevy::{
         mouse::{MouseMotion, MouseWheel, MouseButton},
         keyboard::{KeyCode, KeyboardInput},
     },
-    pbr::{AlphaMode, StandardMaterial},
+    pbr::{AlphaMode, StandardMaterial, wireframe::Wireframe},
     render::mesh::{Indices, PrimitiveTopology},
     render::render_asset::RenderAssetUsages,
     window::PrimaryWindow,
+    gltf::Gltf,
 };
 use std::{
     path::{Path, PathBuf},
@@ -184,6 +185,24 @@ struct ShowAxes(bool);
 
 #[derive(Resource)]
 struct LastModified(SystemTime);
+
+#[derive(Resource)]
+struct TrianglesLastUpdated(SystemTime);
+
+#[derive(Resource, Clone)]
+struct TemplateModel {
+    path: PathBuf,
+    scale: f32,
+    rotation: Vec3, // Euler angles in degrees
+    offset: Vec3, // Translation offset
+    transparency: f32,
+}
+
+#[derive(Resource)]
+struct QuickExit {
+    timer: f32,
+    duration: f32,
+}
 
 #[derive(Event)]
 struct FileChangedEvent {
@@ -1474,6 +1493,8 @@ fn update_triangle_meshes(
     mut triangle_handles: ResMut<TriangleMeshHandles>,
     model_rotation: Res<ModelRotation>,
     camera_query: Query<&CameraController>,
+    last_modified: Option<Res<LastModified>>,
+    mut triangles_last_updated: Local<Option<SystemTime>>,
 ) {
     // Check if mesh_data is available and triangles should be shown
     let Some(mesh_data) = mesh_data else {
@@ -1489,13 +1510,21 @@ fn update_triangle_meshes(
         return;
     }
 
-    // Check if we need to update triangles (either no triangles exist or mesh data changed)
-    // Note: We don't check model_rotation.is_changed() because rotation is handled by transform in rendering
-    let needs_update = triangle_handles.handles.is_empty() || mesh_data.is_changed();
+    // Check if we need to update triangles
+    let file_was_modified = last_modified
+        .as_ref()
+        .map(|lm| triangles_last_updated.map_or(true, |tlu| lm.0 > tlu))
+        .unwrap_or(false);
     
+    let needs_update = triangle_handles.handles.is_empty() || file_was_modified;
     
     if !needs_update {
         return;
+    }
+    
+    // Update the last updated timestamp
+    if let Some(lm) = last_modified.as_ref() {
+        *triangles_last_updated = Some(lm.0);
     }
 
     // Clear previous triangle meshes
@@ -2131,23 +2160,386 @@ fn hsv_to_rgb(h: f32, s: f32, v: f32) -> (f32, f32, f32) {
     }
 }
 
+fn load_template_model(
+    mut commands: Commands,
+    template_model: Option<Res<TemplateModel>>,
+    asset_server: Res<AssetServer>,
+    quick_exit: Option<Res<QuickExit>>,
+) {
+    if let Some(template) = template_model {
+        if quick_exit.is_some() {
+            println!("Loading GLTF from: {:?}", template.path);
+        }
+        
+        // Convert relative paths to absolute paths for asset loading
+        let absolute_path = if template.path.is_absolute() {
+            template.path.clone()
+        } else {
+            std::env::current_dir().unwrap_or_default().join(&template.path)
+        };
+        let path_str = absolute_path.to_string_lossy().to_string();
+        let gltf_handle: Handle<Gltf> = asset_server.load(path_str);
+        
+        if quick_exit.is_some() {
+            println!("GLTF handle created: {:?}", gltf_handle);
+        }
+        
+        let transform = Transform {
+            translation: template.offset,
+            rotation: Quat::from_euler(
+                EulerRot::XYZ,
+                template.rotation.x.to_radians(),
+                template.rotation.y.to_radians(),
+                template.rotation.z.to_radians(),
+            ),
+            scale: Vec3::splat(template.scale),
+        };
+        
+        commands.spawn((
+            TemplateModelEntity,
+            TemplateMeshPending {
+                gltf_handle,
+                transform,
+            },
+        ));
+        
+        if quick_exit.is_some() {
+            println!("Template entity spawned with scale: {}", template.scale);
+            println!("Template parent transform: {:?}", transform);
+        }
+    }
+}
+
+#[derive(Component)]
+struct TemplateMeshPending {
+    gltf_handle: Handle<Gltf>,
+    transform: Transform,
+}
+
+#[derive(Component)]
+struct TemplateModelEntity;
+
+#[derive(Component)]
+struct TemplateMeshEntity;
+
+#[derive(Component)]
+struct TemplateWireframeMesh {
+    mesh: Handle<Mesh>,
+    transform: Transform,
+}
+
+fn quick_exit_system(
+    mut exit: EventWriter<bevy::app::AppExit>,
+    mut quick_exit: Option<ResMut<QuickExit>>,
+    time: Res<Time>,
+) {
+    if let Some(ref mut quick_exit) = quick_exit {
+        quick_exit.timer += time.delta_seconds();
+        if quick_exit.timer >= quick_exit.duration {
+            println!("Quick exit after {:.1} seconds", quick_exit.duration);
+            exit.send(bevy::app::AppExit);
+        }
+    }
+}
+
+fn extract_template_meshes(
+    mut commands: Commands,
+    pending_query: Query<(Entity, &TemplateMeshPending), With<TemplateModelEntity>>,
+    gltf_assets: Res<Assets<Gltf>>,
+    gltf_mesh_assets: Res<Assets<bevy::gltf::GltfMesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    quick_exit: Option<Res<QuickExit>>,
+) {
+    for (entity, pending) in pending_query.iter() {
+        if let Some(gltf) = gltf_assets.get(&pending.gltf_handle) {
+            if quick_exit.is_some() {
+                println!("GLTF loaded with {} meshes", gltf.meshes.len());
+            }
+            
+            commands.entity(entity).remove::<TemplateMeshPending>();
+            
+            // Create a wireframe material for the template model
+            let template_material = materials.add(StandardMaterial {
+                base_color: Color::rgba(1.0, 0.0, 0.0, 0.0), // Fully transparent - don't render faces
+                alpha_mode: AlphaMode::Blend,
+                cull_mode: None,
+                unlit: true,
+                ..default()
+            });
+            
+            let mut total_primitives = 0;
+            
+            for (i, gltf_mesh_handle) in gltf.meshes.iter().enumerate() {
+                if let Some(gltf_mesh) = gltf_mesh_assets.get(gltf_mesh_handle) {
+                    if quick_exit.is_some() {
+                        println!("Mesh {}: {} primitives", i, gltf_mesh.primitives.len());
+                    }
+                    
+                    for (j, primitive) in gltf_mesh.primitives.iter().enumerate() {
+                        // Store mesh info for wireframe gizmo rendering instead of creating entities
+                        commands.spawn((
+                            TemplateWireframeMesh {
+                                mesh: primitive.mesh.clone(),
+                                transform: pending.transform,
+                            },
+                        ));
+                        total_primitives += 1;
+                        
+                        if quick_exit.is_some() {
+                            println!("Created wireframe reference for primitive {} of mesh {}", j, i);
+                            println!("Mesh transform: {:?}", pending.transform);
+                        }
+                    }
+                } else if quick_exit.is_some() {
+                    println!("Warning: GltfMesh {} not yet loaded", i);
+                }
+            }
+            
+            if quick_exit.is_some() {
+                println!("Total template mesh entities created: {}", total_primitives);
+            }
+        } else if quick_exit.is_some() {
+            println!("GLTF asset not yet loaded");
+        }
+    }
+}
+
+fn debug_template_transforms(
+    template_query: Query<Entity, With<TemplateModelEntity>>,
+    children_query: Query<&Children>,
+    child_transform_query: Query<&Transform, Without<TemplateModelEntity>>,
+    quick_exit: Option<Res<QuickExit>>,
+) {
+    if quick_exit.is_some() {
+        for entity in template_query.iter() {
+            println!("[DEBUG] Template parent entity {:?} (no transform component)", entity);
+            
+            if let Ok(children) = children_query.get(entity) {
+                for &child in children.iter() {
+                    if let Ok(child_transform) = child_transform_query.get(child) {
+                        println!("[DEBUG] Template child entity {:?} transform: {:?}", child, child_transform);
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn draw_template_wireframe(
+    mut gizmos: Gizmos,
+    wireframe_query: Query<&TemplateWireframeMesh>,
+    meshes: Res<Assets<Mesh>>,
+) {
+    for wireframe_mesh in wireframe_query.iter() {
+        if let Some(mesh) = meshes.get(&wireframe_mesh.mesh) {
+            // Get mesh vertex positions
+            if let Some(vertex_attribute) = mesh.attribute(Mesh::ATTRIBUTE_POSITION) {
+                if let bevy::render::mesh::VertexAttributeValues::Float32x3(positions) = vertex_attribute {
+                    // Get indices to draw edges
+                    if let Some(indices) = mesh.indices() {
+                        match indices {
+                            bevy::render::mesh::Indices::U32(indices) => {
+                                // Draw triangles as wireframe (3 lines per triangle)
+                                for triangle in indices.chunks(3) {
+                                    if triangle.len() == 3 {
+                                        let v0 = Vec3::from(positions[triangle[0] as usize]);
+                                        let v1 = Vec3::from(positions[triangle[1] as usize]);
+                                        let v2 = Vec3::from(positions[triangle[2] as usize]);
+                                        
+                                        // Apply transform
+                                        let t0 = wireframe_mesh.transform.transform_point(v0);
+                                        let t1 = wireframe_mesh.transform.transform_point(v1);
+                                        let t2 = wireframe_mesh.transform.transform_point(v2);
+                                        
+                                        // Draw triangle edges
+                                        gizmos.line(t0, t1, Color::GRAY);
+                                        gizmos.line(t1, t2, Color::GRAY);
+                                        gizmos.line(t2, t0, Color::GRAY);
+                                    }
+                                }
+                            }
+                            bevy::render::mesh::Indices::U16(indices) => {
+                                // Handle U16 indices similarly
+                                for triangle in indices.chunks(3) {
+                                    if triangle.len() == 3 {
+                                        let v0 = Vec3::from(positions[triangle[0] as usize]);
+                                        let v1 = Vec3::from(positions[triangle[1] as usize]);
+                                        let v2 = Vec3::from(positions[triangle[2] as usize]);
+                                        
+                                        // Apply transform
+                                        let t0 = wireframe_mesh.transform.transform_point(v0);
+                                        let t1 = wireframe_mesh.transform.transform_point(v1);
+                                        let t2 = wireframe_mesh.transform.transform_point(v2);
+                                        
+                                        // Draw triangle edges
+                                        gizmos.line(t0, t1, Color::GRAY);
+                                        gizmos.line(t1, t2, Color::GRAY);
+                                        gizmos.line(t2, t0, Color::GRAY);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn make_template_transparent(
+    template_mesh_query: Query<Entity, (With<TemplateMeshEntity>, Without<TransparentTemplateProcessed>)>,
+    mut material_query: Query<&mut Handle<StandardMaterial>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut commands: Commands,
+    template_config: Option<Res<TemplateModel>>,
+) {
+    if let Some(template) = &template_config {
+        println!("[TEMPLATE] Making template transparent with alpha: {}", template.transparency);
+        
+        let mut materials_processed = 0;
+        
+        // Process all template mesh entities directly
+        for entity in template_mesh_query.iter() {
+            if let Ok(mut material_handle) = material_query.get_mut(entity) {
+                // Clone the material so we can modify it
+                if let Some(material) = materials.get(&*material_handle) {
+                    println!("[TEMPLATE] Found material on entity {:?}, making transparent", entity);
+                    let mut new_material = material.clone();
+                    new_material.alpha_mode = AlphaMode::Blend;
+                    new_material.base_color.set_a(template.transparency);
+                    
+                    // Create a new material asset and replace the handle
+                    let new_handle = materials.add(new_material);
+                    *material_handle = new_handle;
+                    materials_processed += 1;
+                }
+            }
+            
+            // Mark this mesh entity as processed
+            commands.entity(entity).insert(TransparentTemplateProcessed);
+        }
+        
+        println!("[TEMPLATE] Processed {} materials for transparency", materials_processed);
+    }
+}
+
+fn make_descendants_transparent(
+    entity: Entity,
+    children_query: &Query<&Children>,
+    material_query: &mut Query<&mut Handle<StandardMaterial>>,
+    materials: &mut ResMut<Assets<StandardMaterial>>,
+    transparency: f32,
+) -> u32 {
+    let mut materials_processed = 0;
+    
+    // Try to get the material handle for this entity
+    if let Ok(mut material_handle) = material_query.get_mut(entity) {
+        // Clone the material so we can modify it
+        if let Some(material) = materials.get(&*material_handle) {
+            println!("[TEMPLATE] Found material on entity {:?}, making transparent", entity);
+            let mut new_material = material.clone();
+            new_material.alpha_mode = AlphaMode::Blend;
+            new_material.base_color.set_a(transparency);
+            
+            // Create a new material asset and replace the handle
+            let new_handle = materials.add(new_material);
+            *material_handle = new_handle;
+            materials_processed += 1;
+        }
+    }
+    
+    // Recursively process children
+    if let Ok(children) = children_query.get(entity) {
+        println!("[TEMPLATE] Entity {:?} has {} children", entity, children.len());
+        for &child in children.iter() {
+            materials_processed += make_descendants_transparent(child, children_query, material_query, materials, transparency);
+        }
+    }
+    
+    materials_processed
+}
+
+#[derive(Component)]
+struct TransparentTemplateProcessed;
+
 fn main() {
     let args: Vec<String> = env::args().collect();
     if args.len() < 2 {
-        eprintln!("Usage: {} <mesh_file> [--export <export_path>]", args[0]);
+        eprintln!("Usage: {} <mesh_file> [options]", args[0]);
+        eprintln!("Options:");
+        eprintln!("  --export <path>     Export to GLB file");
+        eprintln!("  --t <path>          Template GLTF model path");
+        eprintln!("  --tx <degrees>      Template X rotation (default: 0)");
+        eprintln!("  --ty <degrees>      Template Y rotation (default: 0)");
+        eprintln!("  --tz <degrees>      Template Z rotation (default: 0)");
+        eprintln!("  --ts <scale>        Template scale factor (default: 1.0)");
+        eprintln!("  --q <seconds>       Quick exit after specified seconds (for testing)");
         process::exit(1);
     }
 
     let mesh_file = PathBuf::from(&args[1]);
-    let export_path = if args.len() >= 4 && args[2] == "--export" {
-        Some(PathBuf::from(&args[3]))
-    } else {
-        None
-    };
+    let mut export_path = None;
+    let mut template_path = None;
+    let mut template_rotation = Vec3::ZERO;
+    let mut template_scale = 1.0;
+    let mut template_offset = Vec3::ZERO;
+    let mut quick_exit_duration: Option<f32> = None;
 
-    App::new()
-        .add_plugins(DefaultPlugins)
+    // Parse remaining arguments
+    let mut i = 2;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--export" if i + 1 < args.len() => {
+                export_path = Some(PathBuf::from(&args[i + 1]));
+                i += 2;
+            }
+            "--ref" if i + 1 < args.len() => {
+                template_path = Some(PathBuf::from(&args[i + 1]));
+                i += 2;
+            }
+            "--ref_rot_x" if i + 1 < args.len() => {
+                template_rotation.x = args[i + 1].parse().unwrap_or(0.0);
+                i += 2;
+            }
+            "--ref_rot_y" if i + 1 < args.len() => {
+                template_rotation.y = args[i + 1].parse().unwrap_or(0.0);
+                i += 2;
+            }
+            "--ref_rot_z" if i + 1 < args.len() => {
+                template_rotation.z = args[i + 1].parse().unwrap_or(0.0);
+                i += 2;
+            }
+            "--ref_scale" if i + 1 < args.len() => {
+                template_scale = args[i + 1].parse().unwrap_or(1.0);
+                i += 2;
+            }
+            "--ref_off_x" if i + 1 < args.len() => {
+                template_offset.x = args[i + 1].parse().unwrap_or(0.0);
+                i += 2;
+            }
+            "--ref_off_y" if i + 1 < args.len() => {
+                template_offset.y = args[i + 1].parse().unwrap_or(0.0);
+                i += 2;
+            }
+            "--ref_off_z" if i + 1 < args.len() => {
+                template_offset.z = args[i + 1].parse().unwrap_or(0.0);
+                i += 2;
+            }
+            "--q" if i + 1 < args.len() => {
+                quick_exit_duration = Some(args[i + 1].parse().unwrap_or(3.0));
+                i += 2;
+            }
+            _ => {
+                eprintln!("Unknown argument: {}", args[i]);
+                i += 1;
+            }
+        }
+    }
+
+    let mut app = App::new();
+    app.add_plugins(DefaultPlugins)
         .add_plugins(EguiPlugin)
+        .add_plugins(bevy::pbr::wireframe::WireframePlugin)
         .insert_resource(MeshFile(mesh_file))
         .insert_resource(ModelRotation::default())
         .insert_resource(CameraState::default())
@@ -2155,10 +2547,27 @@ fn main() {
             ExportPath(path)
         } else {
             ExportPath(PathBuf::from("output.glb"))
-        })
+        });
+    
+    // Add template model resource if path is provided
+    if let Some(template_path) = template_path {
+        app.insert_resource(TemplateModel {
+            path: template_path,
+            scale: template_scale,
+            rotation: template_rotation,
+            offset: template_offset,
+            transparency: 0.5, // Default transparency
+        });
+    }
+    
+    if let Some(duration) = quick_exit_duration {
+        app.insert_resource(QuickExit { timer: 0.0, duration });
+    }
+    
+    app
         .add_event::<FileChangedEvent>()  // Register the event
         .insert_resource(TriangleMeshHandles::default())
-        .add_systems(Startup, setup)
+        .add_systems(Startup, (setup, load_template_model))
         .add_systems(
             Update,
             (
@@ -2174,7 +2583,12 @@ fn main() {
             ).chain(),
         )
         .add_systems(Update, update_triangle_meshes.after(handle_file_changes))
-        .add_systems(Update, draw_triangles.after(update_triangle_meshes))
+        .add_systems(Update, draw_triangles)
+        .add_systems(Update, extract_template_meshes)
+        .add_systems(Update, draw_template_wireframe.after(extract_template_meshes))
+        .add_systems(Update, debug_template_transforms.after(extract_template_meshes))
+        .add_systems(Update, make_template_transparent.after(debug_template_transforms))
+        .add_systems(Update, quick_exit_system)
         // Make sure the UI system runs after EguiSet::InitContexts
         .add_systems(Update, update_ui.after(bevy_egui::EguiSet::InitContexts))
         .add_systems(PostUpdate, (draw_bones, draw_axes))

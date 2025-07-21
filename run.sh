@@ -1,1 +1,1 @@
-cargo run --bin viewer example.toml
+cargo run example.toml --ref ./../../devenv/hooded_crow_modeller/human_male.glb --ref_scale 0.1 ref_off_y 0.05 
