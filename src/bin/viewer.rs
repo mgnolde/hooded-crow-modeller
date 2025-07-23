@@ -2338,23 +2338,46 @@ fn draw_template_wireframe(
                 if let bevy::render::mesh::VertexAttributeValues::Float32x3(positions) = vertex_attribute {
                     // Get indices to draw edges
                     if let Some(indices) = mesh.indices() {
+                        // First pass: calculate min/max z values for dynamic color range
+                        let mut min_z = f32::INFINITY;
+                        let mut max_z = f32::NEG_INFINITY;
+                        
+                        let process_triangle = |triangle: &[u32], positions: &[[f32; 3]], transform: Transform| -> (f32, f32, f32) {
+                            let v0 = Vec3::from(positions[triangle[0] as usize]);
+                            let v1 = Vec3::from(positions[triangle[1] as usize]);
+                            let v2 = Vec3::from(positions[triangle[2] as usize]);
+                            
+                            let t0 = transform.transform_point(v0);
+                            let t1 = transform.transform_point(v1);
+                            let t2 = transform.transform_point(v2);
+                            
+                            (t0.z, t1.z, t2.z)
+                        };
+                        
                         match indices {
                             bevy::render::mesh::Indices::U32(indices) => {
-                                // Draw triangles as wireframe (3 lines per triangle)
+                                // Calculate z range
+                                for triangle in indices.chunks(3) {
+                                    if triangle.len() == 3 {
+                                        let (z0, z1, z2) = process_triangle(triangle, positions, wireframe_mesh.transform);
+                                        min_z = min_z.min(z0).min(z1).min(z2);
+                                        max_z = max_z.max(z0).max(z1).max(z2);
+                                    }
+                                }
+                                
+                                // Second pass: draw with calculated range
                                 for triangle in indices.chunks(3) {
                                     if triangle.len() == 3 {
                                         let v0 = Vec3::from(positions[triangle[0] as usize]);
                                         let v1 = Vec3::from(positions[triangle[1] as usize]);
                                         let v2 = Vec3::from(positions[triangle[2] as usize]);
                                         
-                                        // Apply transform
                                         let t0 = wireframe_mesh.transform.transform_point(v0);
                                         let t1 = wireframe_mesh.transform.transform_point(v1);
                                         let t2 = wireframe_mesh.transform.transform_point(v2);
                                         
-                                        // Calculate color based on z-depth for visual depth
                                         let avg_z = (t0.z + t1.z + t2.z) / 3.0;
-                                        let depth_color = get_depth_based_color(avg_z);
+                                        let depth_color = get_dynamic_depth_color(avg_z, min_z, max_z);
                                         
                                         // Draw triangle edges with depth-based coloring
                                         gizmos.line(t0, t1, depth_color);
@@ -2364,21 +2387,30 @@ fn draw_template_wireframe(
                                 }
                             }
                             bevy::render::mesh::Indices::U16(indices) => {
-                                // Handle U16 indices similarly
-                                for triangle in indices.chunks(3) {
+                                let indices_u32: Vec<u32> = indices.iter().map(|&i| i as u32).collect();
+                                
+                                // Calculate z range
+                                for triangle in indices_u32.chunks(3) {
+                                    if triangle.len() == 3 {
+                                        let (z0, z1, z2) = process_triangle(triangle, positions, wireframe_mesh.transform);
+                                        min_z = min_z.min(z0).min(z1).min(z2);
+                                        max_z = max_z.max(z0).max(z1).max(z2);
+                                    }
+                                }
+                                
+                                // Second pass: draw with calculated range
+                                for triangle in indices_u32.chunks(3) {
                                     if triangle.len() == 3 {
                                         let v0 = Vec3::from(positions[triangle[0] as usize]);
                                         let v1 = Vec3::from(positions[triangle[1] as usize]);
                                         let v2 = Vec3::from(positions[triangle[2] as usize]);
                                         
-                                        // Apply transform
                                         let t0 = wireframe_mesh.transform.transform_point(v0);
                                         let t1 = wireframe_mesh.transform.transform_point(v1);
                                         let t2 = wireframe_mesh.transform.transform_point(v2);
                                         
-                                        // Calculate color based on z-depth for visual depth
                                         let avg_z = (t0.z + t1.z + t2.z) / 3.0;
-                                        let depth_color = get_depth_based_color(avg_z);
+                                        let depth_color = get_dynamic_depth_color(avg_z, min_z, max_z);
                                         
                                         // Draw triangle edges with depth-based coloring
                                         gizmos.line(t0, t1, depth_color);
@@ -2607,18 +2639,23 @@ fn main() {
         .run();
 }
 
-fn get_depth_based_color(z: f32) -> Color {
+fn get_dynamic_depth_color(z: f32, min_z: f32, max_z: f32) -> Color {
     // Map z-coordinate to grayscale for visual depth
     // Closer objects (higher z) = white
     // Farther objects (lower z) = black
     
-    // Normalize z to a reasonable range for typical models
-    // You may need to adjust these values based on your model scale
-    let normalized_z = (z + 5.0) / 10.0; // Maps z from [-5, 5] to [0, 1]
+    // Handle edge case where all z values are the same
+    if (max_z - min_z).abs() < f32::EPSILON {
+        return Color::srgba(0.5, 0.5, 0.5, 1.0); // Medium gray
+    }
+    
+    // Normalize z to the actual range of the model
+    let normalized_z = (z - min_z) / (max_z - min_z); // Maps z from [min_z, max_z] to [0, 1]
     let clamped_z = normalized_z.clamp(0.0, 1.0);
     
-    // Create grayscale gradient from black (far) to white (near)
-    let gray_value = clamped_z;
+    // Create grayscale gradient from gray (far) to white (near)
+    // Map from [0,1] to [0.5,1] to go from gray (127,127,127) to white (255,255,255)
+    let gray_value = 0.5 + (clamped_z * 0.5);
     Color::srgba(gray_value, gray_value, gray_value, 1.0)
 }
 
