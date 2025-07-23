@@ -939,17 +939,36 @@ impl Model {
     }
 
     fn process_templates(value: &mut toml::Value, variables: &HashMap<String, f64>) -> Result<(), Box<dyn Error>> {
+        // First pass: collect all objects from the entire TOML structure
+        let mut verts_map = HashMap::new();
+        let mut triangles_map = HashMap::new();
+        Self::collect_all_objects(value, &mut verts_map, &mut triangles_map);
+        
+        // Second pass: process templates with collected objects
+        Self::process_templates_with_context(value, variables, &mut verts_map, &mut triangles_map)
+    }
+    
+    fn process_templates_with_context(
+        value: &mut toml::Value, 
+        variables: &HashMap<String, f64>,
+        verts_map: &mut HashMap<String, toml::Value>,
+        triangles_map: &mut HashMap<String, toml::Value>
+    ) -> Result<(), Box<dyn Error>> {
         use toml::Value;
         
         match value {
             Value::Table(table) => {
+                // Collect vertices and triangles first
+                Self::collect_objects_from_table(table, verts_map, triangles_map);
+                
+                // Process all values
                 for (_, v) in table.iter_mut() {
-                    Self::process_templates(v, variables)?;
+                    Self::process_templates_with_context(v, variables, verts_map, triangles_map)?;
                 }
             }
             Value::Array(array) => {
                 for v in array.iter_mut() {
-                    Self::process_templates(v, variables)?;
+                    Self::process_templates_with_context(v, variables, verts_map, triangles_map)?;
                 }
             }
             Value::String(s) => {
@@ -957,8 +976,11 @@ impl Model {
                 if s.starts_with("{{") && s.ends_with("}}") {
                     let template_content = &s[2..s.len()-2].trim();
                     
-                    // Simple expression evaluation
-                    if let Ok(result) = Self::evaluate_expression(template_content, variables) {
+                    // Check for mirroring syntax first
+                    if let Some(result) = Self::process_mirror_expression(template_content, verts_map, triangles_map)? {
+                        *value = result;
+                    } else if let Ok(result) = Self::evaluate_expression(template_content, variables) {
+                        // Fallback to numeric expression evaluation
                         *value = Value::Float(result);
                     }
                 }
@@ -993,6 +1015,146 @@ impl Model {
         
         // Try to parse as direct number
         expr.parse::<f64>().map_err(|e| e.into())
+    }
+    
+    fn collect_all_objects(
+        value: &toml::Value,
+        verts_map: &mut HashMap<String, toml::Value>,
+        triangles_map: &mut HashMap<String, toml::Value>
+    ) {
+        use toml::Value;
+        
+        match value {
+            Value::Table(table) => {
+                Self::collect_objects_from_table(table, verts_map, triangles_map);
+            }
+            Value::Array(array) => {
+                for v in array {
+                    Self::collect_all_objects(v, verts_map, triangles_map);
+                }
+            }
+            _ => {}
+        }
+    }
+    
+    fn collect_objects_from_table(
+        table: &toml::value::Table,
+        verts_map: &mut HashMap<String, toml::Value>,
+        triangles_map: &mut HashMap<String, toml::Value>
+    ) {
+        // Look for 'verts' sections
+        if let Some(verts_table) = table.get("verts").and_then(|v| v.as_table()) {
+            for (name, value) in verts_table {
+                verts_map.insert(name.clone(), value.clone());
+            }
+        }
+        
+        // Look for 'triangles' sections
+        if let Some(triangles_table) = table.get("triangles").and_then(|v| v.as_table()) {
+            for (name, value) in triangles_table {
+                triangles_map.insert(name.clone(), value.clone());
+            }
+        }
+        
+        // Recursively search in nested tables
+        for (_, value) in table {
+            if let Some(nested_table) = value.as_table() {
+                Self::collect_objects_from_table(nested_table, verts_map, triangles_map);
+            }
+        }
+    }
+    
+    fn process_mirror_expression(
+        expr: &str,
+        verts_map: &HashMap<String, toml::Value>,
+        triangles_map: &HashMap<String, toml::Value>
+    ) -> Result<Option<toml::Value>, Box<dyn Error>> {
+        // Check if expression contains mirroring syntax: "object_name, axis=true"
+        if let Some(comma_pos) = expr.find(',') {
+            let object_name = expr[..comma_pos].trim();
+            let mirror_spec = expr[comma_pos + 1..].trim();
+            
+            // Parse mirror specification (e.g., "y=true", "x=true")
+            if let Some(eq_pos) = mirror_spec.find('=') {
+                let axis = mirror_spec[..eq_pos].trim();
+                let enabled = mirror_spec[eq_pos + 1..].trim();
+                
+                if enabled == "true" {
+                    // Try to mirror a vertex
+                    if let Some(vert_value) = verts_map.get(object_name) {
+                        return Ok(Some(Self::mirror_vertex(vert_value, axis)?));
+                    }
+                    
+                    // Try to mirror a triangle
+                    if let Some(triangle_value) = triangles_map.get(object_name) {
+                        return Ok(Some(Self::mirror_triangle(triangle_value, axis)?));
+                    }
+                }
+            }
+        }
+        
+        Ok(None)
+    }
+    
+    fn mirror_vertex(vert_value: &toml::Value, axis: &str) -> Result<toml::Value, Box<dyn Error>> {
+        let mut mirrored = vert_value.clone();
+        
+        if let Some(table) = mirrored.as_table_mut() {
+            match axis {
+                "y" => {
+                    // Mirror rotation for y-axis (flip horizontally)
+                    if let Some(rot_value) = table.get_mut("rot") {
+                        if let Some(rot) = rot_value.as_float() {
+                            // Mirror rotation: 180 - original_rotation
+                            let mirrored_rot = 180.0 - rot;
+                            *rot_value = toml::Value::Float(mirrored_rot);
+                        } else if let Some(rot) = rot_value.as_integer() {
+                            let mirrored_rot = 180 - rot;
+                            *rot_value = toml::Value::Integer(mirrored_rot);
+                        }
+                    }
+                }
+                "x" => {
+                    // Mirror rotation for x-axis (flip vertically)
+                    if let Some(rot_value) = table.get_mut("rot") {
+                        if let Some(rot) = rot_value.as_float() {
+                            let mirrored_rot = -rot;
+                            *rot_value = toml::Value::Float(mirrored_rot);
+                        } else if let Some(rot) = rot_value.as_integer() {
+                            let mirrored_rot = -rot;
+                            *rot_value = toml::Value::Integer(mirrored_rot);
+                        }
+                    }
+                }
+                _ => return Err(format!("Unsupported mirror axis: {}", axis).into()),
+            }
+        }
+        
+        Ok(mirrored)
+    }
+    
+    fn mirror_triangle(triangle_value: &toml::Value, axis: &str) -> Result<toml::Value, Box<dyn Error>> {
+        let mut mirrored = triangle_value.clone();
+        
+        if let Some(table) = mirrored.as_table_mut() {
+            // For triangles, we need to reverse the winding order to maintain correct normals
+            if let Some(verts_value) = table.get_mut("verts") {
+                if let Some(verts_array) = verts_value.as_array_mut() {
+                    // Reverse the vertex order for proper winding after mirroring
+                    verts_array.reverse();
+                    
+                    // Append mirror suffix to vertex names
+                    for vert in verts_array.iter_mut() {
+                        if let Some(vert_name) = vert.as_str() {
+                            let mirrored_name = format!("{}_mirror", vert_name);
+                            *vert = toml::Value::String(mirrored_name);
+                        }
+                    }
+                }
+            }
+        }
+        
+        Ok(mirrored)
     }
 
 // Helper function to convert HSV to RGB

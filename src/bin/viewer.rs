@@ -7,10 +7,10 @@ use bevy::{
         mouse::{MouseMotion, MouseWheel, MouseButton},
         keyboard::{KeyCode, KeyboardInput},
     },
-    pbr::{AlphaMode, StandardMaterial, wireframe::Wireframe},
+    pbr::StandardMaterial,
+    render::alpha::AlphaMode,
     render::mesh::{Indices, PrimitiveTopology},
     render::render_asset::RenderAssetUsages,
-    window::PrimaryWindow,
     gltf::Gltf,
 };
 use std::{
@@ -132,7 +132,7 @@ impl Default for VisualizationSettings {
             show_triangles: true, // Always show triangles by default for debugging
             show_mesh: true,
             visualization_mode: BoneVisualization::Solid,
-            line_width: 5.0,
+            line_width: 15.0,
             triangle_outline: TriangleOutlineMode::Black,
         };
         println!("Created default visualization settings: show_triangles={}", settings.show_triangles);
@@ -1574,7 +1574,7 @@ fn update_triangle_meshes(
             // Create a material with fixed color that's not affected by lighting
             let triangle_material = materials.add(StandardMaterial {
                 // Use the exact color from the TOML file without any conversion
-                base_color: Color::rgba(color[0], color[1], color[2], color[3]),
+                base_color: Color::srgba(color[0], color[1], color[2], color[3]),
                 // Make it unlit (not affected by lighting)
                 unlit: true,                
                 // Enable transparency
@@ -1610,6 +1610,7 @@ fn draw_bones(
     camera_query: Query<&CameraController>,
 ) {
     if let Some(mesh_data) = mesh_data {
+        
         // Draw bones
         let pivot = camera_query.single().look_at_target;
         for bone in mesh_data.positions.values() {
@@ -1619,7 +1620,7 @@ fn draw_bones(
             gizmos.line(
                 rotated_start,
                 rotated_end,
-                Color::rgb(bone.color.0[0], bone.color.0[1], bone.color.0[2])
+                Color::srgb(bone.color.0[0], bone.color.0[1], bone.color.0[2])
             );
         }
         
@@ -1628,7 +1629,7 @@ fn draw_bones(
             let rotated_start = model_rotation.rotation * (bone.start - pivot) + pivot;
             let rotated_end = model_rotation.rotation * (bone.end - pivot) + pivot;
             let bone_direction = (rotated_end - rotated_start).normalize();
-            let bone_color = Color::rgb(bone.color.0[0], bone.color.0[1], bone.color.0[2]);
+            let bone_color = Color::srgb(bone.color.0[0], bone.color.0[1], bone.color.0[2]);
             
             // Create arrow marker at the end of the bone
             let arrow_size = 0.02;
@@ -1655,7 +1656,7 @@ fn draw_bones(
                 rotated_position,
                 Quat::IDENTITY,
                 sphere_radius,
-                Color::rgb(color[0], color[1], color[2])
+                Color::srgb(color[0], color[1], color[2])
             );
         }
     }
@@ -1682,7 +1683,7 @@ fn draw_triangles(
             // Determine outline color based on settings
             let outline_color = match settings.triangle_outline {
                 TriangleOutlineMode::Black => Color::BLACK,
-                TriangleOutlineMode::Matching => Color::rgba(fill_color[0], fill_color[1], fill_color[2], 1.0), // Full opacity
+                TriangleOutlineMode::Matching => Color::srgba(fill_color[0], fill_color[1], fill_color[2], 1.0), // Full opacity
             };
             
             // Apply model rotation to triangle vertices around look_at_target
@@ -1712,7 +1713,7 @@ fn draw_axes(mut gizmos: Gizmos, show_axes: Res<ShowAxes>, model_rotation: Res<M
     for i in -grid_size..=grid_size {
         let offset = i as f32 * grid_spacing;
         let alpha = if i == 0 { 0.5 } else { 0.2 };
-        let color = Color::rgba(0.5, 0.5, 0.5, alpha);
+        let color = Color::srgba(0.5, 0.5, 0.5, alpha);
 
         // X-parallel lines
         let pivot = camera_query.single().look_at_target;
@@ -2237,7 +2238,7 @@ fn quick_exit_system(
         quick_exit.timer += time.delta_seconds();
         if quick_exit.timer >= quick_exit.duration {
             println!("Quick exit after {:.1} seconds", quick_exit.duration);
-            exit.send(bevy::app::AppExit);
+            exit.send(AppExit::Success);
         }
     }
 }
@@ -2260,7 +2261,7 @@ fn extract_template_meshes(
             
             // Create a wireframe material for the template model
             let template_material = materials.add(StandardMaterial {
-                base_color: Color::rgba(1.0, 0.0, 0.0, 0.0), // Fully transparent - don't render faces
+                base_color: Color::srgba(1.0, 0.0, 0.0, 0.0), // Fully transparent - don't render faces
                 alpha_mode: AlphaMode::Blend,
                 cull_mode: None,
                 unlit: true,
@@ -2351,10 +2352,14 @@ fn draw_template_wireframe(
                                         let t1 = wireframe_mesh.transform.transform_point(v1);
                                         let t2 = wireframe_mesh.transform.transform_point(v2);
                                         
-                                        // Draw triangle edges
-                                        gizmos.line(t0, t1, Color::GRAY);
-                                        gizmos.line(t1, t2, Color::GRAY);
-                                        gizmos.line(t2, t0, Color::GRAY);
+                                        // Calculate color based on z-depth for visual depth
+                                        let avg_z = (t0.z + t1.z + t2.z) / 3.0;
+                                        let depth_color = get_depth_based_color(avg_z);
+                                        
+                                        // Draw triangle edges with depth-based coloring
+                                        gizmos.line(t0, t1, depth_color);
+                                        gizmos.line(t1, t2, depth_color);
+                                        gizmos.line(t2, t0, depth_color);
                                     }
                                 }
                             }
@@ -2371,10 +2376,14 @@ fn draw_template_wireframe(
                                         let t1 = wireframe_mesh.transform.transform_point(v1);
                                         let t2 = wireframe_mesh.transform.transform_point(v2);
                                         
-                                        // Draw triangle edges
-                                        gizmos.line(t0, t1, Color::GRAY);
-                                        gizmos.line(t1, t2, Color::GRAY);
-                                        gizmos.line(t2, t0, Color::GRAY);
+                                        // Calculate color based on z-depth for visual depth
+                                        let avg_z = (t0.z + t1.z + t2.z) / 3.0;
+                                        let depth_color = get_depth_based_color(avg_z);
+                                        
+                                        // Draw triangle edges with depth-based coloring
+                                        gizmos.line(t0, t1, depth_color);
+                                        gizmos.line(t1, t2, depth_color);
+                                        gizmos.line(t2, t0, depth_color);
                                     }
                                 }
                             }
@@ -2406,7 +2415,7 @@ fn make_template_transparent(
                     println!("[TEMPLATE] Found material on entity {:?}, making transparent", entity);
                     let mut new_material = material.clone();
                     new_material.alpha_mode = AlphaMode::Blend;
-                    new_material.base_color.set_a(template.transparency);
+                    new_material.base_color = new_material.base_color.with_alpha(template.transparency);
                     
                     // Create a new material asset and replace the handle
                     let new_handle = materials.add(new_material);
@@ -2439,7 +2448,7 @@ fn make_descendants_transparent(
             println!("[TEMPLATE] Found material on entity {:?}, making transparent", entity);
             let mut new_material = material.clone();
             new_material.alpha_mode = AlphaMode::Blend;
-            new_material.base_color.set_a(transparency);
+            new_material.base_color = new_material.base_color.with_alpha(transparency);
             
             // Create a new material asset and replace the handle
             let new_handle = materials.add(new_material);
@@ -2463,6 +2472,9 @@ fn make_descendants_transparent(
 struct TransparentTemplateProcessed;
 
 fn main() {
+    // Force Vulkan backend to avoid OpenGL/GLES surface issues in WSL2
+    env::set_var("WGPU_BACKEND", "vulkan");
+    
     let args: Vec<String> = env::args().collect();
     if args.len() < 2 {
         eprintln!("Usage: {} <mesh_file> [options]", args[0]);
@@ -2594,3 +2606,19 @@ fn main() {
         .add_systems(PostUpdate, (draw_bones, draw_axes))
         .run();
 }
+
+fn get_depth_based_color(z: f32) -> Color {
+    // Map z-coordinate to grayscale for visual depth
+    // Closer objects (higher z) = white
+    // Farther objects (lower z) = black
+    
+    // Normalize z to a reasonable range for typical models
+    // You may need to adjust these values based on your model scale
+    let normalized_z = (z + 5.0) / 10.0; // Maps z from [-5, 5] to [0, 1]
+    let clamped_z = normalized_z.clamp(0.0, 1.0);
+    
+    // Create grayscale gradient from black (far) to white (near)
+    let gray_value = clamped_z;
+    Color::srgba(gray_value, gray_value, gray_value, 1.0)
+}
+
