@@ -16,6 +16,162 @@ pub struct Group {
     pub subgroups: HashMap<String, Group>,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct CameraSettings {
+    pub frac: f32,           // Position along bone (0.0 = start, 1.0 = end)
+    pub dist: CameraDistance, // Distance from bone (can use templates like "{{waist}}")
+    pub rot: f32,            // Rotation around bone in degrees
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub enum CameraDistance {
+    Template(String),
+    Resolved(f32),
+}
+
+impl<'de> Deserialize<'de> for CameraDistance {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de::{self, Visitor};
+        
+        struct CameraDistanceVisitor;
+        
+        impl<'de> Visitor<'de> for CameraDistanceVisitor {
+            type Value = CameraDistance;
+            
+            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                formatter.write_str("a string template or numeric value")
+            }
+            
+            fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                Ok(CameraDistance::Template(value.to_string()))
+            }
+            
+            fn visit_f64<E>(self, value: f64) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                Ok(CameraDistance::Resolved(value as f32))
+            }
+            
+            fn visit_i64<E>(self, value: i64) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                Ok(CameraDistance::Resolved(value as f32))
+            }
+        }
+        
+        deserializer.deserialize_any(CameraDistanceVisitor)
+    }
+}
+
+impl<'de> Deserialize<'de> for CameraSettings {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de::{self, MapAccess, Visitor};
+        
+        struct CameraSettingsVisitor;
+        
+        impl<'de> Visitor<'de> for CameraSettingsVisitor {
+            type Value = CameraSettings;
+            
+            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                formatter.write_str("camera settings")
+            }
+            
+            fn visit_map<V>(self, mut map: V) -> Result<CameraSettings, V::Error>
+            where
+                V: MapAccess<'de>,
+            {
+                let mut frac = None;
+                let mut dist = None;
+                let mut rot = None;
+                
+                while let Some(key) = map.next_key::<String>()? {
+                    match key.as_str() {
+                        "frac" => {
+                            if frac.is_some() {
+                                return Err(de::Error::duplicate_field("frac"));
+                            }
+                            frac = Some(map.next_value()?);
+                        }
+                        "dist" => {
+                            if dist.is_some() {
+                                return Err(de::Error::duplicate_field("dist"));
+                            }
+                            dist = Some(map.next_value()?);
+                        }
+                        "rot" => {
+                            if rot.is_some() {
+                                return Err(de::Error::duplicate_field("rot"));
+                            }
+                            rot = Some(map.next_value()?);
+                        }
+                        _ => {
+                            // Ignore unknown fields
+                            let _ = map.next_value::<serde::de::IgnoredAny>()?;
+                        }
+                    }
+                }
+                
+                let frac = frac.ok_or_else(|| de::Error::missing_field("frac"))?;
+                let dist = dist.ok_or_else(|| de::Error::missing_field("dist"))?;
+                let rot = rot.ok_or_else(|| de::Error::missing_field("rot"))?;
+                
+                Ok(CameraSettings { frac, dist, rot })
+            }
+        }
+        
+        deserializer.deserialize_map(CameraSettingsVisitor)
+    }
+}
+
+impl CameraSettings {
+    /// Calculate camera position and look target based on bone coordinates
+    pub fn calculate_camera_transform(&self, bone_start: Vec3, bone_end: Vec3, bone_rotation: f32, distance: f32) -> (Vec3, Vec3) {
+        // Calculate the direction of the bone
+        let bone_direction = (bone_end - bone_start).normalize();
+        let bone_length = (bone_end - bone_start).length();
+        
+        // Find position along the bone based on frac (this is what the camera looks at)
+        let look_target = bone_start + bone_direction * bone_length * self.frac;
+        
+        // Calculate camera position by moving away from the bone at specified distance and rotation
+        // Use the same logic as SkinVert but with the distance parameter
+        let perpendicular = if bone_direction.y.abs() < 0.9 {
+            Vec3::Y.cross(bone_direction).normalize()
+        } else {
+            Vec3::X.cross(bone_direction).normalize()
+        };
+        
+        // Apply rotation around the bone
+        let rotation_radians = (self.rot + bone_rotation).to_radians();
+        let cos_rot = rotation_radians.cos();
+        let sin_rot = rotation_radians.sin();
+        
+        let up = bone_direction.cross(perpendicular).normalize();
+        let offset = perpendicular * cos_rot + up * sin_rot;
+        
+        // Position camera at distance from the look target
+        let camera_position = look_target + offset * distance;
+        
+        (camera_position, look_target)
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct BoneSettings {
+    pub cam: Option<CameraSettings>,
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Bone {
     #[serde(default = "default_bone_length", alias = "len")]
@@ -32,6 +188,8 @@ pub struct Bone {
     pub triangle_defs: HashMap<String, TriangleDefinition>,
     #[serde(default, alias = "col")]
     pub color: Option<[f32; 4]>,
+    #[serde(default)]
+    pub settings: Option<BoneSettings>,
     // Resolved values after inheritance
     #[serde(skip)]
     pub resolved_orientation: f32,
@@ -516,6 +674,7 @@ impl Model {
             
             // If this table has bone properties, add the bone to the current group
             if has_length {
+                println!("Parsing bone at path: {}, table keys: {:?}", current_path, table.keys().collect::<Vec<_>>());
                 // Find parent bone to potentially inherit properties
                 let parent_bone = if current_path.contains('.') {
                     let parent_path = current_path.rsplit_once('.').unwrap().0;
@@ -569,6 +728,26 @@ impl Model {
                     // Assign parsed triangle definitions
                     triangle_defs: parsed_triangles,
                     color: None,
+                    settings: if let Some(cam_value) = table.get("cam") {
+                        println!("Found 'cam' in TOML for bone, attempting to parse: {:?}", cam_value);
+                        // Parse camera settings directly from bone
+                        let cam_settings: Result<CameraSettings, _> = cam_value.clone().try_into();
+                        match cam_settings {
+                            Ok(cam) => {
+                                println!("Successfully parsed camera settings: frac={}, dist={:?}, rot={}", cam.frac, cam.dist, cam.rot);
+                                Some(BoneSettings { cam: Some(cam) })
+                            },
+                            Err(e) => {
+                                println!("Failed to parse camera settings: {:?}", e);
+                                None
+                            },
+                        }
+                    } else if let Some(settings_value) = table.get("settings") {
+                        // Parse settings section
+                        settings_value.clone().try_into().ok()
+                    } else {
+                        None
+                    },
                     resolved_orientation: 0.0,
                     resolved_slope: 0.0,
                     resolved_rotation: 0.0,
@@ -938,6 +1117,14 @@ impl Model {
         Ok(variables)
     }
 
+    pub fn extract_and_resolve_variables_as_strings(toml_data: &mut toml::Value) -> Result<HashMap<String, String>, Box<dyn Error>> {
+        let variables = Self::extract_and_resolve_variables(toml_data)?;
+        let string_variables = variables.into_iter()
+            .map(|(k, v)| (k, v.to_string()))
+            .collect();
+        Ok(string_variables)
+    }
+
     fn process_templates(value: &mut toml::Value, variables: &HashMap<String, f64>) -> Result<(), Box<dyn Error>> {
         // First pass: collect all objects from the entire TOML structure
         let mut verts_map = HashMap::new();
@@ -1155,6 +1342,192 @@ impl Model {
         }
         
         Ok(mirrored)
+    }
+
+    /// Find camera settings in the model and calculate camera transform
+    pub fn find_camera_settings(&self, variables: &HashMap<String, String>) -> Option<(Vec3, Vec3)> {
+        println!("Looking for camera settings in model...");
+        // Iterate through all bones to find camera settings
+        for (group_name, group) in &self.0 {
+            println!("Checking group: {}", group_name);
+            if let Some((camera_pos, look_target)) = self.find_camera_in_group(group_name, group, variables) {
+                return Some((camera_pos, look_target));
+            }
+        }
+        println!("No camera settings found");
+        None
+    }
+
+    fn find_camera_in_group(&self, group_path: &str, group: &Group, variables: &HashMap<String, String>) -> Option<(Vec3, Vec3)> {
+        // Check bones in this group
+        for (bone_name, bone) in &group.bones {
+            println!("Checking bone: {}.{}, has settings: {}", group_path, bone_name, bone.settings.is_some());
+            if let Some(settings) = &bone.settings {
+                println!("Found settings for bone {}.{}, has cam: {}", group_path, bone_name, settings.cam.is_some());
+                if let Some(cam) = &settings.cam {
+                    let full_bone_path = format!("{}.{}", group_path, bone_name);
+                    
+                    // Get bone positions
+                    let all_bones = self.get_bones();
+                    if let Some((bone_start, bone_end)) = self.get_bone_positions(&full_bone_path) {
+                        // Resolve distance template
+                        if let Ok(distance) = self.resolve_distance_template(&cam.dist, variables) {
+                            let bone_rotation = all_bones.get(&full_bone_path)
+                                .map(|b| b.resolved_rotation)
+                                .unwrap_or(0.0);
+                            
+                            let (camera_pos, look_target) = cam.calculate_camera_transform(
+                                bone_start, bone_end, bone_rotation, distance
+                            );
+                            return Some((camera_pos, look_target));
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Check subgroups
+        for (subgroup_name, subgroup) in &group.subgroups {
+            let subgroup_path = format!("{}.{}", group_path, subgroup_name);
+            if let Some(result) = self.find_camera_in_group(&subgroup_path, subgroup, variables) {
+                return Some(result);
+            }
+        }
+        
+        None
+    }
+
+    fn get_bone_positions(&self, bone_path: &str) -> Option<(Vec3, Vec3)> {
+        // Process all bones to get their positions (similar to process_bones_in_order)
+        let mut transforms = HashMap::new();
+        let mut positions = HashMap::new();
+        
+        self.process_bones_for_positions(&mut transforms, &mut positions);
+        
+        // Return the specific bone's position
+        positions.get(bone_path).copied()
+    }
+
+    fn process_bones_for_positions(&self, transforms: &mut HashMap<String, (Mat4, Vec3)>, positions: &mut HashMap<String, (Vec3, Vec3)>) {
+        use std::collections::BTreeMap;
+        
+        // First find all bones and their depths
+        let mut bones_by_depth: BTreeMap<usize, Vec<String>> = BTreeMap::new();
+        
+        fn collect_bones(
+            group: &Group,
+            path: &str,
+            bones_by_depth: &mut BTreeMap<usize, Vec<String>>,
+        ) {
+            let depth = path.matches('.').count();
+            
+            // Add this group if it has bones
+            if !group.bones.is_empty() {
+                bones_by_depth
+                    .entry(depth)
+                    .or_default()
+                    .push(path.to_string());
+            }
+            
+            // Recursively process subgroups
+            for (name, subgroup) in &group.subgroups {
+                let subpath = if path.is_empty() {
+                    name.clone()
+                } else {
+                    format!("{}.{}", path, name)
+                };
+                collect_bones(subgroup, &subpath, bones_by_depth);
+            }
+        }
+
+        // Collect all bones by their depth in the hierarchy
+        if let Some(body) = self.0.get("body") {
+            collect_bones(body, "body", &mut bones_by_depth);
+        }
+
+        // Process bones level by level, starting from the root (lowest depth)
+        for (_depth, paths) in bones_by_depth {
+            for path in paths {
+                self.process_group_bones(&path, transforms, positions);
+            }
+        }
+    }
+
+    fn process_group_bones(&self, group_path: &str, transforms: &mut HashMap<String, (Mat4, Vec3)>, positions: &mut HashMap<String, (Vec3, Vec3)>) -> Option<()> {
+        // Navigate to the group
+        let parts: Vec<&str> = group_path.split('.').collect();
+        let mut current_group = self.0.get(parts[0])?;
+        
+        for &part in parts.iter().skip(1) {
+            current_group = current_group.subgroups.get(part)?;
+        }
+
+        // Process each bone in this group
+        for (bone_name, bone) in &current_group.bones {
+            let full_bone_path = format!("{}.{}", group_path, bone_name);
+            
+            // Find parent path
+            let parent_path = if let Some(last_dot) = group_path.rfind('.') {
+                &group_path[..last_dot]
+            } else {
+                ""
+            };
+
+            // Calculate bone position
+            let bone_start = if parent_path.is_empty() {
+                Vec3::ZERO // Root bone starts at origin
+            } else {
+                // Get parent's end position
+                positions.get(parent_path)
+                    .map(|(_, end)| *end)
+                    .unwrap_or(Vec3::ZERO)
+            };
+
+            // Calculate bone direction and end position
+            let orientation_rad = bone.resolved_orientation.to_radians();
+            let slope_rad = bone.resolved_slope.to_radians();
+            
+            let direction = Vec3::new(
+                orientation_rad.cos() * slope_rad.cos(),
+                slope_rad.sin(),
+                orientation_rad.sin() * slope_rad.cos(),
+            );
+            
+            let bone_end = bone_start + direction * bone.length;
+            
+            // Store positions
+            positions.insert(full_bone_path, (bone_start, bone_end));
+        }
+        
+        Some(())
+    }
+
+    fn resolve_distance_template(&self, dist: &CameraDistance, variables: &HashMap<String, String>) -> Result<f32, Box<dyn Error>> {
+        match dist {
+            CameraDistance::Resolved(value) => Ok(*value),
+            CameraDistance::Template(template) => {
+                // If it's a simple number, parse it directly
+                if let Ok(value) = template.parse::<f32>() {
+                    return Ok(value);
+                }
+                
+                // If it contains template syntax, resolve it
+                if template.contains("{{") && template.contains("}}") {
+                    // Extract the variable name from {{variable_name}}
+                    let start = template.find("{{").ok_or("Invalid template syntax")? + 2;
+                    let end = template.find("}}").ok_or("Invalid template syntax")?;
+                    let var_name = &template[start..end].trim();
+                    
+                    if let Some(value_str) = variables.get(*var_name) {
+                        return value_str.parse::<f32>().map_err(|e| e.into());
+                    } else {
+                        return Err(format!("Variable '{}' not found", var_name).into());
+                    }
+                }
+                
+                Err("Invalid distance template".into())
+            }
+        }
     }
 
 // Helper function to convert HSV to RGB

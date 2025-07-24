@@ -184,6 +184,12 @@ impl Default for CameraController {
 struct ShowAxes(bool);
 
 #[derive(Resource)]
+struct CameraTarget {
+    position: Vec3,
+    target: Vec3,
+}
+
+#[derive(Resource)]
 struct LastModified(SystemTime);
 
 #[derive(Resource)]
@@ -821,14 +827,14 @@ fn setup(
         .unwrap_or_else(|_| SystemTime::now());
     commands.insert_resource(LastModified(modified));
 
-    // Set up camera
-    commands.spawn((
+    // Set up default camera (will be updated after model parsing if camera settings are found)
+    let camera_entity = commands.spawn((
         Camera3dBundle {
             transform: Transform::from_xyz(5.0, 5.0, 5.0).looking_at(Vec3::ZERO, Vec3::Y),
             ..default()
         },
         CameraController::default(),
-    ));
+    )).id();
 
     // Add ambient light
     commands.insert_resource(AmbientLight {
@@ -852,6 +858,7 @@ fn setup(
     });
 
     // Initial file read and model setup
+    println!("SETUP: Starting file read and model setup");
     let content = match fs::read_to_string(&mesh_file.0) {
         Ok(content) => content,
         Err(e) => {
@@ -1050,6 +1057,29 @@ fn setup(
     }
 
     commands.insert_resource(mesh_data);
+
+    // Update camera if model has camera settings
+    println!("Checking for camera settings...");
+    if let Ok(mut toml_value) = content.parse::<toml::Value>() {
+        println!("TOML parsed successfully");
+        if let Ok(variables) = Model::extract_and_resolve_variables_as_strings(&mut toml_value) {
+            println!("Variables extracted: {:?}", variables);
+            if let Some((camera_pos, look_target)) = model.find_camera_settings(&variables) {
+                println!("Camera should be positioned at: {:?}, looking at: {:?}", camera_pos, look_target);
+                
+                // Update the camera transform directly
+                let camera_transform = Transform::from_translation(camera_pos).looking_at(look_target, Vec3::Y);
+                commands.entity(camera_entity).insert(camera_transform);
+                
+                // Also store as resource for potential future use
+                commands.insert_resource(CameraTarget { position: camera_pos, target: look_target });
+            }
+        } else {
+            println!("Failed to extract variables");
+        }
+    } else {
+        println!("Failed to parse TOML");
+    }
 }
 
 fn monitor_file(

@@ -30,6 +30,7 @@ len = 0.18
 
 [body.lower_spine.middle_spine.upper_spine]
 len = 0.15
+cam = { frac = 0.5, dist = "{{waist}}", rot = 180 }
 
 [body.lower_spine.middle_spine.upper_spine.left_upper_arm]
 len = 0.3
