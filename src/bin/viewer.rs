@@ -23,6 +23,7 @@ use std::{
     io::Write,
     process,
 };
+use bevy::render::mesh::{VertexAttributeValues};
 use hooded_crow_modeller::{Model, Group};
 
 #[derive(Default, Reflect, GizmoConfigGroup)]
@@ -228,6 +229,220 @@ impl Default for TriangleMeshHandles {
     }
 }
 
+#[derive(Clone, Debug)]
+struct ExtractedVertex {
+    position: Vec3,
+    bone_name: String,
+    frac: f32,
+    distance: f32,
+    rotation: f32,
+    vertex_name: String,
+}
+
+#[derive(Resource, Default)]
+struct ExtractedVertices {
+    vertices: Vec<ExtractedVertex>,
+    extraction_complete: bool,
+}
+
+
+fn point_to_line_distance_and_projection(point: Vec3, line_start: Vec3, line_end: Vec3) -> (f32, f32, Vec3) {
+    let line_vec = line_end - line_start;
+    let line_length = line_vec.length();
+    
+    if line_length < 1e-6 {
+        // Degenerate line case
+        return (point.distance(line_start), 0.0, line_start);
+    }
+    
+    let point_vec = point - line_start;
+    
+    // Project point onto line to find closest point
+    let projection_scalar = point_vec.dot(line_vec) / (line_length * line_length);
+    let projection_scalar = projection_scalar.clamp(0.0, 1.0); // Clamp to line segment
+    
+    let closest_point_on_line = line_start + line_vec * projection_scalar;
+    let distance = point.distance(closest_point_on_line);
+    
+    (distance, projection_scalar, closest_point_on_line)
+}
+
+fn calculate_rotation_around_bone(point: Vec3, bone_start: Vec3, bone_end: Vec3, closest_point: Vec3) -> f32 {
+    let bone_direction = (bone_end - bone_start).normalize();
+    let to_point = (point - closest_point).normalize();
+    
+    // Create a reference vector perpendicular to the bone
+    let reference = if bone_direction.y.abs() < 0.9 {
+        Vec3::Y.cross(bone_direction).normalize()
+    } else {
+        Vec3::X.cross(bone_direction).normalize()
+    };
+    
+    // Calculate angle between reference and to_point vectors
+    let cos_angle = reference.dot(to_point).clamp(-1.0, 1.0);
+    let sin_angle = reference.cross(to_point).dot(bone_direction);
+    
+    sin_angle.atan2(cos_angle).to_degrees()
+}
+
+fn extract_vertices_from_template(
+    template_wireframe_query: Query<&TemplateWireframeMesh>,
+    mesh_assets: Res<Assets<Mesh>>,
+    mesh_data: Option<Res<MeshData>>,
+    mut extracted_vertices: ResMut<ExtractedVertices>,
+    template_model: Option<Res<TemplateModel>>,
+) {
+    if extracted_vertices.extraction_complete {
+        return;
+    }
+    
+    if let (Some(mesh_data), Some(_template)) = (&mesh_data, &template_model) {
+        let mut all_vertices = Vec::new();
+        
+        // Extract vertices from all template wireframe meshes
+        for wireframe_mesh in template_wireframe_query.iter() {
+            if let Some(mesh) = mesh_assets.get(&wireframe_mesh.mesh) {
+                if let Some(VertexAttributeValues::Float32x3(positions)) = 
+                    mesh.attribute(Mesh::ATTRIBUTE_POSITION) {
+                    
+                    for position_array in positions {
+                        let world_position = wireframe_mesh.transform.transform_point(
+                            Vec3::new(position_array[0], position_array[1], position_array[2])
+                        );
+                        all_vertices.push(world_position);
+                    }
+                }
+            }
+        }
+        
+        println!("Extracted {} vertices from template mesh", all_vertices.len());
+        
+        // For each vertex, find the closest bone and calculate relative coordinates
+        for (vertex_index, vertex_position) in all_vertices.iter().enumerate() {
+            let mut closest_distance = f32::INFINITY;
+            let mut closest_bone_name = String::new();
+            let mut best_frac = 0.0;
+            let mut best_rotation = 0.0;
+            
+            // Check distance to all bones
+            for (bone_name, bone_data) in &mesh_data.positions {
+                let (distance, frac, closest_point) = point_to_line_distance_and_projection(
+                    *vertex_position, bone_data.start, bone_data.end
+                );
+                
+                if distance < closest_distance {
+                    closest_distance = distance;
+                    closest_bone_name = bone_name.clone();
+                    best_frac = frac;
+                    best_rotation = calculate_rotation_around_bone(
+                        *vertex_position, bone_data.start, bone_data.end, closest_point
+                    );
+                }
+            }
+            
+            if !closest_bone_name.is_empty() {
+                let vertex_name = format!("auto_vertex_{:04}", vertex_index);
+                
+                extracted_vertices.vertices.push(ExtractedVertex {
+                    position: *vertex_position,
+                    bone_name: closest_bone_name,
+                    frac: best_frac,
+                    distance: closest_distance,
+                    rotation: best_rotation,
+                    vertex_name,
+                });
+            }
+        }
+        
+        extracted_vertices.extraction_complete = true;
+        println!("Vertex extraction complete! Found {} vertices", extracted_vertices.vertices.len());
+        
+        // Trigger TOML generation
+        generate_enriched_toml(&extracted_vertices);
+    }
+}
+
+fn generate_enriched_toml(extracted_vertices: &ExtractedVertices) {
+    // Read the original TOML file
+    let args: Vec<String> = env::args().collect();
+    if args.len() < 2 {
+        println!("Error: No input TOML file specified");
+        return;
+    }
+    
+    let input_path = Path::new(&args[1]);
+    let original_content = match fs::read_to_string(input_path) {
+        Ok(content) => content,
+        Err(e) => {
+            println!("Error reading original TOML file: {}", e);
+            return;
+        }
+    };
+    
+    // Generate output filename
+    let output_path = input_path.with_extension("enriched.toml");
+    
+    // Parse original TOML to understand structure
+    let mut enriched_content = original_content.clone();
+    
+    // Group vertices by bone
+    let mut vertices_by_bone: HashMap<String, Vec<&ExtractedVertex>> = HashMap::new();
+    for vertex in &extracted_vertices.vertices {
+        vertices_by_bone.entry(vertex.bone_name.clone())
+            .or_insert_with(Vec::new)
+            .push(vertex);
+    }
+    
+    // Store the length before consuming the HashMap
+    let num_bones = vertices_by_bone.len();
+    
+    // Add vertices to appropriate bones in TOML
+    for (bone_name, vertices) in vertices_by_bone {
+        let bone_section = format!("[{}]", bone_name);
+        
+        if let Some(bone_start) = enriched_content.find(&bone_section) {
+            // Find the end of this bone's section
+            let remaining_content = &enriched_content[bone_start..];
+            let next_section_start = remaining_content.find("\n[")
+                .map(|pos| bone_start + pos)
+                .unwrap_or(enriched_content.len());
+            
+            // Generate skin_verts entries
+            let mut skin_verts_section = String::new();
+            if vertices.len() > 0 {
+                skin_verts_section.push_str("\nskin_verts = [\n");
+                
+                for vertex in vertices {
+                    skin_verts_section.push_str(&format!(
+                        "    {{ id = \"{}\", frac = {:.6}, dist = {:.6}, rot = {:.2} }},\n",
+                        vertex.vertex_name,
+                        vertex.frac,
+                        vertex.distance,
+                        vertex.rotation
+                    ));
+                }
+                
+                skin_verts_section.push_str("]\n");
+            }
+            
+            // Insert the skin_verts section before the next section
+            enriched_content.insert_str(next_section_start, &skin_verts_section);
+        }
+    }
+    
+    // Write the enriched TOML file
+    match fs::write(&output_path, enriched_content) {
+        Ok(_) => {
+            println!("Successfully generated enriched TOML file: {:?}", output_path);
+            println!("Added {} vertices across {} bones", 
+                     extracted_vertices.vertices.len(), 
+                     num_bones);
+        }
+        Err(e) => {
+            println!("Error writing enriched TOML file: {}", e);
+        }
+    }
+}
 
 fn calculate_transform(orientation: f32, slope: f32, rotation: f32) -> Mat4 {
     // Convert angles to radians
@@ -2744,6 +2959,7 @@ fn main() {
         .insert_resource(MeshFile(mesh_file))
         .insert_resource(ModelRotation::default())
         .insert_resource(CameraState::default())
+        .insert_resource(ExtractedVertices::default())
         .insert_resource(if let Some(path) = export_path {
             ExportPath(path)
         } else {
@@ -2786,6 +3002,7 @@ fn main() {
         .add_systems(Update, update_triangle_meshes.after(handle_file_changes))
         .add_systems(Update, draw_triangles)
         .add_systems(Update, extract_template_meshes)
+        .add_systems(Update, extract_vertices_from_template.after(extract_template_meshes).after(handle_file_changes))
         .add_systems(Update, draw_template_wireframe.after(extract_template_meshes))
         .add_systems(Update, debug_template_transforms.after(extract_template_meshes))
         .add_systems(Update, make_template_transparent.after(debug_template_transforms))
