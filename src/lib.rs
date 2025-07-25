@@ -211,20 +211,117 @@ pub struct TriangleDefinition {
     pub color: Option<[f32; 4]>,  // Optional color for the triangle
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct SkinVert {
-    #[serde(default, alias = "len")]
     pub frac: f32,  // Fractional position along the bone (0.0 = start, 1.0 = end)
-    #[serde(default, alias = "dist")]
     pub distance: f32,        // Distance from the bone
-    #[serde(default, alias = "rot")]
     pub rotation: f32,  // Rotation around the bone in degrees
-    #[serde(default = "default_weight")]
     pub weight: f32,          // Weight of influence
-    #[serde(default)]
     pub id: Option<String>,   // Optional identifier for the skin vertex
-    #[serde(default, alias = "tri")]
     pub triangles: HashMap<String, usize>, // Triangle references: face_name -> vertex position
+    pub ruler: bool,          // Show visual aids for positioning
+}
+
+impl<'de> Deserialize<'de> for SkinVert {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de::{self, MapAccess, Visitor};
+        
+        struct SkinVertVisitor;
+        
+        impl<'de> Visitor<'de> for SkinVertVisitor {
+            type Value = SkinVert;
+            
+            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                formatter.write_str("a SkinVert")
+            }
+            
+            fn visit_map<V>(self, mut map: V) -> Result<SkinVert, V::Error>
+            where
+                V: MapAccess<'de>,
+            {
+                let mut frac = None;
+                let mut distance = None;
+                let mut rotation = None;
+                let mut weight = None;
+                let mut id = None;
+                let mut triangles = None;
+                let mut ruler = None;
+                
+                while let Some(key) = map.next_key::<String>()? {
+                    match key.as_str() {
+                        "frac" | "len" => {
+                            if frac.is_some() {
+                                return Err(de::Error::duplicate_field("frac"));
+                            }
+                            frac = Some(map.next_value()?);
+                        }
+                        "distance" | "dist" => {
+                            if distance.is_some() {
+                                return Err(de::Error::duplicate_field("distance"));
+                            }
+                            distance = Some(map.next_value()?);
+                        }
+                        "rotation" | "rot" => {
+                            if rotation.is_some() {
+                                return Err(de::Error::duplicate_field("rotation"));
+                            }
+                            rotation = Some(map.next_value()?);
+                        }
+                        "weight" => {
+                            if weight.is_some() {
+                                return Err(de::Error::duplicate_field("weight"));
+                            }
+                            weight = Some(map.next_value()?);
+                        }
+                        "id" => {
+                            if id.is_some() {
+                                return Err(de::Error::duplicate_field("id"));
+                            }
+                            id = Some(map.next_value()?);
+                        }
+                        "triangles" | "tri" => {
+                            if triangles.is_some() {
+                                return Err(de::Error::duplicate_field("triangles"));
+                            }
+                            triangles = Some(map.next_value()?);
+                        }
+                        "ruler" => {
+                            if ruler.is_some() {
+                                return Err(de::Error::duplicate_field("ruler"));
+                            }
+                            let ruler_value: bool = map.next_value()?;
+                            println!("PARSE DEBUG: Found ruler field with value: {}", ruler_value);
+                            ruler = Some(ruler_value);
+                        }
+                        _ => {
+                            // Ignore unknown fields
+                            let _ = map.next_value::<serde::de::IgnoredAny>()?;
+                        }
+                    }
+                }
+                
+                let frac = frac.unwrap_or(0.5);
+                let distance = distance.unwrap_or(0.0);
+                let rotation = rotation.unwrap_or(0.0);
+                let weight = weight.unwrap_or(1.0);
+                let triangles = triangles.unwrap_or_else(HashMap::new);
+                let ruler = ruler.unwrap_or(false);
+                
+                let result = SkinVert { frac, distance, rotation, weight, id, triangles, ruler };
+                
+                if ruler {
+                    println!("PARSE DEBUG: Created SkinVert with ruler=true: {:?}", result);
+                }
+                
+                Ok(result)
+            }
+        }
+        
+        deserializer.deserialize_map(SkinVertVisitor)
+    }
 }
 
 impl Default for SkinVert {
@@ -236,6 +333,7 @@ impl Default for SkinVert {
             weight: 1.0,          // Default to full weight
             id: None,             // Default to no id
             triangles: HashMap::new(), // Default to no triangle references
+            ruler: false,         // Default to no ruler visualization
         }
     }
 }
@@ -574,6 +672,13 @@ impl Model {
                     }
                 }
                 
+                // Parse ruler field
+                if let Some(ruler) = v.get("ruler").and_then(|v| v.as_bool()) {
+                    skin_vert.ruler = ruler;
+                    if ruler {
+                        println!("PARSE DEBUG: Setting ruler=true for array vertex");
+                    }
+                }
                 
                 skin_vert
             }).collect();
@@ -630,6 +735,14 @@ impl Model {
                             if let Some(pos) = position.as_integer() {
                                 skin_vert.triangles.insert(face_name.clone(), pos as usize);
                             }
+                        }
+                    }
+                    
+                    // Parse ruler field
+                    if let Some(ruler) = props.get("ruler").and_then(|v| v.as_bool()) {
+                        skin_vert.ruler = ruler;
+                        if ruler {
+                            println!("PARSE DEBUG: Setting ruler=true for vertex '{}'", id);
                         }
                     }
                     

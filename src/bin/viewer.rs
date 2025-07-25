@@ -75,6 +75,17 @@ struct BonePosition {
     color: BoneColor,
 }
 
+#[derive(Clone)]
+struct RulerData {
+    vertex_position: Vec3,    // The vertex position
+    bone_start: Vec3,         // Start of the bone
+    bone_end: Vec3,           // End of the bone
+    frac: f32,               // Fractional position along bone
+    distance: f32,           // Distance from bone
+    rotation: f32,           // Rotation around bone
+    vertex_id: String,       // Vertex identifier
+}
+
 #[derive(Resource, Clone)]
 struct MeshData {
     positions: HashMap<String, BonePosition>,
@@ -82,6 +93,7 @@ struct MeshData {
     skin_vertex_positions: Vec<(Vec3, [f32; 3], Option<String>, [f32; 4])>, // Store skin vertex positions, colors and IDs
     triangles: HashMap<String, ([Vec3; 3], [f32; 4])>, // Store triangles as (name, ([vertex positions], color))
     skin_vertex_colors: Vec<[f32; 4]>, // Store colors for skin vertices
+    rulers: Vec<RulerData>, // Store ruler visualization data
 }
 
 impl Default for MeshData {
@@ -92,6 +104,7 @@ impl Default for MeshData {
             skin_vertex_positions: Vec::new(),
             triangles: HashMap::new(),
             skin_vertex_colors: Vec::new(),
+            rulers: Vec::new(),
         }
     }
 }
@@ -160,7 +173,7 @@ impl Default for CameraController {
         Self {
             zoom_sensitivity: 0.5,
             look_at_target: Vec3::ZERO,
-            movement_speed: 5.0,
+            movement_speed: 1.5,
             zoom_speed: 2.0,
             rotation_speed: 1.0,
         }
@@ -514,6 +527,7 @@ fn handle_file_changes(
         let mut triangles: HashMap<String, ([Vec3; 3], [f32; 4])> = HashMap::new();
         let mut triangle_colors: HashMap<String, [f32; 4]> = HashMap::new();
         let mut skin_vertex_colors = Vec::new();
+        let mut rulers = Vec::new();
         
         // Iterate through all bones in the model
         // println!("SETUP: Processing bones for positions and skin vertices");
@@ -549,6 +563,26 @@ fn handle_file_changes(
                     // Add skin vertex to our collection with the correct colors
                     skin_vertex_positions.push((position, rgb_color, Some(id.clone()), color));
                     skin_vertex_colors.push(color);
+                    
+                    // Debug all vertices to find the issue
+                    if id.contains("ruler_test") {
+                        println!("FILE CHANGE DEBUG: Found vertex '{}' with ruler={}, frac={}, dist={}, rot={}", 
+                                 id, skin_vert.ruler, skin_vert.frac, skin_vert.distance, skin_vert.rotation);
+                    }
+                    
+                    // Collect ruler data if enabled
+                    if skin_vert.ruler {
+                        println!("RULER DEBUG: Collecting ruler data for vertex '{}' at {:?}", id, position);
+                        rulers.push(RulerData {
+                            vertex_position: position,
+                            bone_start: *start,
+                            bone_end: *end,
+                            frac: skin_vert.frac,
+                            distance: skin_vert.distance,
+                            rotation: skin_vert.rotation,
+                            vertex_id: id.clone(),
+                        });
+                    }
                     // println!("PROCESSING: Added skin vertex at {:?} for bone '{}' with id {:?}", position, full_path, id);
                 }
             }
@@ -724,6 +758,8 @@ fn handle_file_changes(
         mesh_data.skin_vertex_positions = skin_vertex_positions;
         mesh_data.triangles = triangles;
         mesh_data.skin_vertex_colors = skin_vertex_colors;
+        mesh_data.rulers = rulers;
+        println!("FINAL MESHDATA: Set {} rulers in mesh_data", mesh_data.rulers.len());
         
         println!("FINAL MESHDATA: {} triangles stored in MeshData", mesh_data.triangles.len());
         for (name, (verts, color)) in &mesh_data.triangles {
@@ -872,6 +908,7 @@ fn setup(
     let mut skin_vertex_positions = Vec::new();
     let mut triangles: HashMap<String, ([Vec3; 3], [f32; 4])> = HashMap::new();
     let mut skin_vertex_colors = Vec::new();
+    let mut rulers = Vec::new();
 
     let max_depth = positions.keys()
         .map(|path| get_bone_depth(path))
@@ -888,6 +925,7 @@ fn setup(
             let color = get_rainbow_color(bone_depth, max_depth).0;
             positions_with_colors.insert(full_path.clone(), (*start, *end, color));
             
+            println!("SETUP DEBUG: Bone '{}' has {} skin vertices", full_path, bone.skin_verts.len());
             for skin_vert in &bone.skin_verts {
                 // Calculate position of skin vertex using the bone's start and end
                 let position = skin_vert.calculate_position(*start, *end, bone.resolved_rotation);
@@ -900,12 +938,34 @@ fn setup(
                 // Store the vertex position and ID
                 let id = skin_vert.id.clone().unwrap_or_else(|| full_path.clone());
                 
+                // Remove debug for now
+                
                 // Extract RGB components for the vertex color (for rendering)
                 let rgb_color = [color[0], color[1], color[2]];
                 
                 // Add skin vertex to our collection with the correct colors
                 skin_vertex_positions.push((position, rgb_color, Some(id.clone()), color));
                 skin_vertex_colors.push(color);
+                
+                // Debug all vertices to find the issue
+                if id.contains("ruler_test") {
+                    println!("SETUP DEBUG: Found vertex '{}' with ruler={}, frac={}, dist={}, rot={}", 
+                             id, skin_vert.ruler, skin_vert.frac, skin_vert.distance, skin_vert.rotation);
+                }
+                
+                // Collect ruler data if enabled
+                if skin_vert.ruler {
+                    println!("SETUP RULER DEBUG: Collecting ruler data for vertex '{}' at {:?}", id, position);
+                    rulers.push(RulerData {
+                        vertex_position: position,
+                        bone_start: *start,
+                        bone_end: *end,
+                        frac: skin_vert.frac,
+                        distance: skin_vert.distance,
+                        rotation: skin_vert.rotation,
+                        vertex_id: id.clone(),
+                    });
+                }
                 
                 // Debug print the color
                 println!("Setup: Vertex color for {}: {:?}", id, color);
@@ -1023,6 +1083,8 @@ fn setup(
     mesh_data.skin_vertex_positions = skin_vertex_positions;
     mesh_data.triangles = triangles;
     mesh_data.skin_vertex_colors = skin_vertex_colors;
+    println!("[SETUP] Assigning {} rulers to mesh_data", rulers.len());
+    mesh_data.rulers = rulers;
 
     println!("[SETUP] FINAL MESHDATA: {} triangles stored in MeshData", mesh_data.triangles.len());
     for (name, (verts, color)) in &mesh_data.triangles {
@@ -1699,6 +1761,75 @@ fn draw_triangles(
             gizmos.line(rotated_v0, rotated_v1, outline_color);
             gizmos.line(rotated_v1, rotated_v2, outline_color);
             gizmos.line(rotated_v2, rotated_v0, outline_color);
+        }
+    }
+}
+
+fn draw_rulers(
+    mut gizmos: Gizmos,
+    mesh_data: Res<MeshData>,
+    model_rotation: Res<ModelRotation>,
+    camera_query: Query<&CameraController>,
+) {
+    let pivot = camera_query.single().look_at_target;
+    
+    println!("DRAW RULERS: Found {} collected rulers to draw", mesh_data.rulers.len());
+    
+    for ruler in &mesh_data.rulers {
+        println!("DRAW RULERS: Drawing ruler for vertex '{}' at {:?}", ruler.vertex_id, ruler.vertex_position);
+        // 1. Draw frac indicator line along bone
+        let bone_direction = (ruler.bone_end - ruler.bone_start).normalize();
+        let bone_length = (ruler.bone_end - ruler.bone_start).length();
+        let frac_point = ruler.bone_start + bone_direction * bone_length * ruler.frac;
+        
+        // Apply model rotation
+        let rotated_bone_start = model_rotation.rotation * (ruler.bone_start - pivot) + pivot;
+        let rotated_frac_point = model_rotation.rotation * (frac_point - pivot) + pivot;
+        
+        // Draw line from bone start to frac position in yellow
+        gizmos.line(rotated_bone_start, rotated_frac_point, Color::srgb(1.0, 1.0, 0.0));
+        
+        // 2. Draw orthogonal distance line from bone to vertex
+        let rotated_vertex = model_rotation.rotation * (ruler.vertex_position - pivot) + pivot;
+        
+        // Draw line from frac point to vertex position in cyan
+        gizmos.line(rotated_frac_point, rotated_vertex, Color::srgb(0.0, 1.0, 1.0));
+        
+        // 3. Draw rotation circle around bone at frac position
+        if ruler.distance > 0.001 { // Only draw circle if there's meaningful distance
+            let circle_radius = ruler.distance;
+            
+            // Create orthogonal vectors for the circle
+            let perpendicular = if bone_direction.y.abs() < 0.9 {
+                Vec3::Y.cross(bone_direction).normalize()
+            } else {
+                Vec3::X.cross(bone_direction).normalize()
+            };
+            let bitangent = bone_direction.cross(perpendicular).normalize();
+            
+            // Draw circle with 16 segments
+            let segments = 16;
+            for i in 0..segments {
+                let angle1 = (i as f32 / segments as f32) * 2.0 * std::f32::consts::PI;
+                let angle2 = ((i + 1) as f32 / segments as f32) * 2.0 * std::f32::consts::PI;
+                
+                let point1 = frac_point + perpendicular * circle_radius * angle1.cos() + bitangent * circle_radius * angle1.sin();
+                let point2 = frac_point + perpendicular * circle_radius * angle2.cos() + bitangent * circle_radius * angle2.sin();
+                
+                let rotated_point1 = model_rotation.rotation * (point1 - pivot) + pivot;
+                let rotated_point2 = model_rotation.rotation * (point2 - pivot) + pivot;
+                
+                // Draw circle segments in magenta
+                gizmos.line(rotated_point1, rotated_point2, Color::srgb(1.0, 0.0, 1.0));
+            }
+            
+            // Draw radius line at current rotation to show the rotation position
+            let rotation_radians = ruler.rotation.to_radians();
+            let radius_point = frac_point + perpendicular * circle_radius * rotation_radians.cos() + bitangent * circle_radius * rotation_radians.sin();
+            let rotated_radius_point = model_rotation.rotation * (radius_point - pivot) + pivot;
+            
+            // Draw radius line in red to show current rotation
+            gizmos.line(rotated_frac_point, rotated_radius_point, Color::srgb(1.0, 0.0, 0.0));
         }
     }
 }
@@ -2603,7 +2734,7 @@ fn main() {
         .add_systems(Update, quick_exit_system)
         // Make sure the UI system runs after EguiSet::InitContexts
         .add_systems(Update, update_ui.after(bevy_egui::EguiSet::InitContexts))
-        .add_systems(PostUpdate, (draw_bones, draw_axes))
+        .add_systems(PostUpdate, (draw_bones, draw_axes, draw_rulers))
         .run();
 }
 

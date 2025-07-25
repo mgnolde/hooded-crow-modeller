@@ -12,7 +12,7 @@ rot = 0
 
 [body.lower_spine.verts]
 # Vertices with IDs but no triangle references
-ls1 = { frac = 0.0, dist = "{{waist}}", rot = 180 }
+ls1 = { frac = 0.0, dist = "{{waist}}", rot = 180, ruler = true }
 ls2 = { frac = 0.0, dist = "{{lower_waist}}", rot = 240 }
 ls3 = { frac = 0.4, dist = "{{waist}}", rot = 180 }
 ls4 = { frac = 0.4, dist = "{{super_waist}}", rot = 240 }

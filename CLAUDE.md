@@ -32,6 +32,13 @@
 - `Model`: Main container with groups, bones, and rendering data
 - `SkinVert`: Vertex positioning with bone relationships
 
+## Ruler Visualization
+- Add `ruler = true` to any vertex definition to enable visual debugging aids
+- Shows yellow line indicating frac position along bone
+- Shows cyan line indicating distance from bone to vertex
+- Shows magenta circle indicating possible rotation positions around bone
+- Shows red line indicating current rotation angle
+
 ## Development Practices
 - Always run `cargo check` before testing changes
 - Use debug output for complex parsing and positioning logic
