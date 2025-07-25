@@ -1173,6 +1173,37 @@ fn mouse_wheel(
     }
 }
 
+fn update_template_rotation(
+    template_wireframe_query: &mut Query<&mut TemplateWireframeMesh>,
+    template_model: &Option<Res<TemplateModel>>,
+    model_rotation: &ModelRotation,
+    pivot: Vec3,
+) {
+    if let Some(template) = template_model {
+        let original_rotation = Quat::from_euler(
+            EulerRot::XYZ,
+            template.rotation.x.to_radians(),
+            template.rotation.y.to_radians(),
+            template.rotation.z.to_radians(),
+        );
+        
+        let combined_rotation = model_rotation.rotation * original_rotation;
+        
+        // Calculate the original position relative to pivot
+        let original_translation = template.offset;
+        let relative_position = original_translation - pivot;
+        
+        // Apply rotation around pivot
+        let rotated_relative_position = model_rotation.rotation * relative_position;
+        let new_translation = rotated_relative_position + pivot;
+        
+        for mut wireframe_mesh in template_wireframe_query.iter_mut() {
+            wireframe_mesh.transform.rotation = combined_rotation;
+            wireframe_mesh.transform.translation = new_translation;
+        }
+    }
+}
+
 fn update_camera(
     time: Res<Time>,
     keyboard: Res<ButtonInput<KeyCode>>,
@@ -1180,6 +1211,8 @@ fn update_camera(
     mut model_rotation: ResMut<ModelRotation>,
     mut camera_state: ResMut<CameraState>,
     mesh_data: Option<Res<MeshData>>,
+    mut template_wireframe_query: Query<&mut TemplateWireframeMesh>,
+    template_model: Option<Res<TemplateModel>>,
 ) {
     let (mut transform, mut controller) = camera_query.single_mut();
     let delta = time.delta_seconds();
@@ -1340,35 +1373,48 @@ fn update_camera(
     let alt_currently_pressed = keyboard.pressed(KeyCode::AltLeft) || keyboard.pressed(KeyCode::AltRight);
     
     // NUMPAD KEYS for model rotation (separate from camera controls)
+    let mut model_rotation_changed = false;
     if keyboard.pressed(KeyCode::Numpad8) {
         // Numpad 8 - Rotate model forward around X-axis (pitch)
         let rotation = Quat::from_rotation_x(-controller.rotation_speed * speed_multiplier * delta);
         model_rotation.rotation = rotation * model_rotation.rotation;
+        model_rotation_changed = true;
     }
     if keyboard.pressed(KeyCode::Numpad2) {
         // Numpad 2 - Rotate model backward around X-axis (pitch)
         let rotation = Quat::from_rotation_x(controller.rotation_speed * speed_multiplier * delta);
         model_rotation.rotation = rotation * model_rotation.rotation;
+        model_rotation_changed = true;
     }
     if keyboard.pressed(KeyCode::Numpad4) {
         // Numpad 4 - Rotate model left around Y-axis (yaw)
         let rotation = Quat::from_rotation_y(controller.rotation_speed * speed_multiplier * delta);
         model_rotation.rotation = rotation * model_rotation.rotation;
+        model_rotation_changed = true;
     }
     if keyboard.pressed(KeyCode::Numpad6) {
         // Numpad 6 - Rotate model right around Y-axis (yaw)
         let rotation = Quat::from_rotation_y(-controller.rotation_speed * speed_multiplier * delta);
         model_rotation.rotation = rotation * model_rotation.rotation;
+        model_rotation_changed = true;
     }
     if keyboard.pressed(KeyCode::Numpad7) {
         // Numpad 7 - Rotate model around Z-axis (roll left)
         let rotation = Quat::from_rotation_z(controller.rotation_speed * speed_multiplier * delta);
         model_rotation.rotation = rotation * model_rotation.rotation;
+        model_rotation_changed = true;
     }
     if keyboard.pressed(KeyCode::Numpad9) {
         // Numpad 9 - Rotate model around Z-axis (roll right)
         let rotation = Quat::from_rotation_z(-controller.rotation_speed * speed_multiplier * delta);
         model_rotation.rotation = rotation * model_rotation.rotation;
+        model_rotation_changed = true;
+    }
+    
+    // Update template rotation if model rotation changed
+    if model_rotation_changed {
+        let pivot = controller.look_at_target;
+        update_template_rotation(&mut template_wireframe_query, &template_model, &model_rotation, pivot);
     }
     if keyboard.pressed(KeyCode::PageUp) && !ctrl_currently_pressed && !alt_currently_pressed {
         // PgUp - Move camera up

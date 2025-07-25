@@ -1,8 +1,0 @@
-[body]
-waist = 0.1
-
-[body.test_bone]
-len = 0.2
-
-[body.test_bone.verts]
-test_vertex = { frac = 0.5, dist = 0.1, rot = 0, ruler = true }

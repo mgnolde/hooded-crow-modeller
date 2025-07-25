@@ -39,22 +39,27 @@ rot = 0
 
 [body.lower_spine.middle_spine.upper_spine.left_upper_arm.left_lower_arm]
 len = 0.4
- 
+slope = 4 
 
 [body.lower_spine.middle_spine.upper_spine.left_upper_arm.left_lower_arm.left_hand]
 len = 0.1
+orient = -5
 
 [body.lower_spine.middle_spine.upper_spine.right_upper_arm]
 len = 0.3
-orient = -100
-slope = 20
+orient = -92
 rot = 0
 
+
 [body.lower_spine.middle_spine.upper_spine.right_upper_arm.right_lower_arm]
-len = 0.3
+len = 0.4
+slope = 4 
+
 
 [body.lower_spine.middle_spine.upper_spine.right_upper_arm.right_lower_arm.right_hand]
 len = 0.1
+orient = -5
+
 
 [body.lower_spine.middle_spine.upper_spine.neck]
 len = 0.12
@@ -70,14 +75,14 @@ slope = 0
 rot = 0
 
 [body.left_pelvis.left_upper_leg]
-orient = -1
-slope = -90
+orient = 0
+slope = -85
 len = 0.51
 
 [body.left_pelvis.left_upper_leg.left_lower_leg]
 len = 0.45
 orient = 5
-slope = -1
+slope = -10
 
 
 [body.left_pelvis.left_upper_leg.left_lower_leg.left_foot]
@@ -91,16 +96,22 @@ orient = -90
 slope = 0
 rot = 0
 
+
 [body.right_pelvis.right_upper_leg]
-slope = -30
-len = 0.3
+orient = 0
+slope = -85
+len = 0.51
+
 
 [body.right_pelvis.right_upper_leg.right_lower_leg]
-len = 0.5
+len = 0.45
+orient = -5
+slope = -10
+
 
 [body.right_pelvis.right_upper_leg.right_lower_leg.right_foot]
-len = 0.3
-slope = 90
-orient = 90
-rot = 0
+len = 0.15
+slope = 60
+orient = 80
+
 
