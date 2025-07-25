@@ -117,9 +117,7 @@ enum TriangleOutlineMode {
 
 #[derive(Resource)]
 struct VisualizationSettings {
-    show_skin_vertices: bool,
     show_triangles: bool,
-    show_mesh: bool,
     visualization_mode: BoneVisualization,
     line_width: f32,
     triangle_outline: TriangleOutlineMode,
@@ -128,9 +126,7 @@ struct VisualizationSettings {
 impl Default for VisualizationSettings {
     fn default() -> Self {
         let settings = Self {
-            show_skin_vertices: true,
             show_triangles: true, // Always show triangles by default for debugging
-            show_mesh: true,
             visualization_mode: BoneVisualization::Solid,
             line_width: 15.0,
             triangle_outline: TriangleOutlineMode::Black,
@@ -142,7 +138,6 @@ impl Default for VisualizationSettings {
 
 #[derive(Resource)]
 struct ColorCache {
-    colors: BTreeMap<String, BoneColor>,
 }
 
 #[derive(Resource)]
@@ -153,11 +148,7 @@ struct ExportState {
 
 #[derive(Component)]
 struct CameraController {
-    orbit_sensitivity: f32,
-    pan_sensitivity: f32,
     zoom_sensitivity: f32,
-    orbit_button: MouseButton,
-    pan_button: MouseButton,
     look_at_target: Vec3,
     movement_speed: f32,
     zoom_speed: f32,
@@ -167,11 +158,7 @@ struct CameraController {
 impl Default for CameraController {
     fn default() -> Self {
         Self {
-            orbit_sensitivity: 1.0,
-            pan_sensitivity: 0.002,
             zoom_sensitivity: 0.5,
-            orbit_button: MouseButton::Left,
-            pan_button: MouseButton::Right,
             look_at_target: Vec3::ZERO,
             movement_speed: 5.0,
             zoom_speed: 2.0,
@@ -185,15 +172,11 @@ struct ShowAxes(bool);
 
 #[derive(Resource)]
 struct CameraTarget {
-    position: Vec3,
-    target: Vec3,
 }
 
 #[derive(Resource)]
 struct LastModified(SystemTime);
 
-#[derive(Resource)]
-struct TrianglesLastUpdated(SystemTime);
 
 #[derive(Resource, Clone)]
 struct TemplateModel {
@@ -228,12 +211,6 @@ impl Default for TriangleMeshHandles {
     }
 }
 
-fn hash_content(content: &str) -> u64 {
-    use std::hash::{Hash, Hasher};
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    content.hash(&mut hasher);
-    hasher.finish()
-}
 
 fn calculate_transform(orientation: f32, slope: f32, rotation: f32) -> Mat4 {
     // Convert angles to radians
@@ -491,7 +468,7 @@ fn process_bones_in_order(
 fn handle_file_changes(
     mut file_events: EventReader<FileChangedEvent>,
     mut commands: Commands,
-    export_path: Option<Res<ExportPath>>,
+    _export_path: Option<Res<ExportPath>>,
     mut camera_query: Query<(&mut Transform, &CameraController), With<Camera>>,
     light_query: Query<Entity, With<DirectionalLight>>,
     settings: Option<Res<VisualizationSettings>>,
@@ -511,7 +488,7 @@ fn handle_file_changes(
         let camera_position = camera_transform.translation;
         
         // Process bones to build positions and skin vertices
-        let bones = model.get_bones();
+        let _bones = model.get_bones();
         // println!("Found {} bones in the model", bones.len());
         // for (path, bone) in &bones {
         //     println!("Processing bone: {} with {} skin vertices", path, bone.skin_verts.len());
@@ -639,7 +616,7 @@ fn handle_file_changes(
         // Then try the old method (recalculating from vertices)
         // Print the skin vertex positions and IDs that were loaded
         println!("DEBUG: Loaded {} skin vertices with these IDs:", skin_vertex_positions.len());
-        for (i, (pos, _, id, color)) in skin_vertex_positions.iter().enumerate() {
+        for (i, (pos, _, id, _color)) in skin_vertex_positions.iter().enumerate() {
             if let Some(id) = id {
                 println!("  Vertex {}: ID='{}', pos={:?}", i, id, pos);
             }
@@ -801,13 +778,11 @@ fn handle_file_changes(
             visualization_mode: BoneVisualization::Solid,
             line_width: 5.0,
             show_triangles: true,
-            show_mesh: true,
-            show_skin_vertices: true,
             triangle_outline, // Use preserved or default setting
         });
-        commands.insert_resource(ColorCache { colors: color_map.clone() });
+        commands.insert_resource(ColorCache {});
 
-        if let Some(ref export_res) = export_path {
+        if let Some(ref export_res) = _export_path {
             commands.insert_resource(ExportState {
                 path: export_res.0.clone(),
                 exported: false,
@@ -819,7 +794,7 @@ fn handle_file_changes(
 fn setup(
     mut commands: Commands,
     mesh_file: Res<MeshFile>,
-    export_path: Option<Res<ExportPath>>,
+    _export_path: Option<Res<ExportPath>>,
 ) {
     // Initialize LastModified with current file modification time
     let modified = fs::metadata(&mesh_file.0)
@@ -878,9 +853,7 @@ fn setup(
     // Initialize resources
     commands.insert_resource(ShowAxes(true));
     commands.insert_resource(VisualizationSettings {
-        show_skin_vertices: true,
         show_triangles: true,
-        show_mesh: true,
         visualization_mode: BoneVisualization::Solid,
         line_width: 5.0,
         triangle_outline: TriangleOutlineMode::Black, // Default to black outlines
@@ -1036,7 +1009,7 @@ fn setup(
     }
 
     // Store triangle colors in skin_vertex_colors in the same order as triangles
-    for (name, (vertices, color)) in &triangles {
+    for (_name, (_vertices, color)) in &triangles {
         // Use the triangle's own color
         skin_vertex_colors.push(*color);
     }
@@ -1072,7 +1045,7 @@ fn setup(
                 commands.entity(camera_entity).insert(camera_transform);
                 
                 // Also store as resource for potential future use
-                commands.insert_resource(CameraTarget { position: camera_pos, target: look_target });
+                commands.insert_resource(CameraTarget {});
             }
         } else {
             println!("Failed to extract variables");
@@ -1168,12 +1141,12 @@ fn update_camera(
     
     // CTRL + Arrow keys = Camera movement
     // Flag to track if we're doing camera movement (to completely disable model rotation)
-    let mut camera_movement_active = false;
+    let mut _camera_movement_active = false;
     
     // FIRST-PERSON FLY-THROUGH CAMERA CONTROLS
     // WASD + QE keys for camera movement relative to camera orientation
     if keyboard.pressed(KeyCode::KeyW) || keyboard.pressed(KeyCode::KeyA) || keyboard.pressed(KeyCode::KeyS) || keyboard.pressed(KeyCode::KeyD) || keyboard.pressed(KeyCode::KeyQ) || keyboard.pressed(KeyCode::KeyE) {
-        camera_movement_active = true;
+        _camera_movement_active = true;
     }
     
     if keyboard.pressed(KeyCode::KeyW) {
@@ -1564,7 +1537,7 @@ fn update_triangle_meshes(
 
 
     // Create triangle meshes
-    for (i, (name, (vertices, color))) in mesh_data.triangles.iter().enumerate() {
+    for (_i, (name, (vertices, color))) in mesh_data.triangles.iter().enumerate() {
             
                      
             // Create a mesh for this triangle
@@ -1678,7 +1651,7 @@ fn draw_bones(
         }
         
         // Draw skin vertices as spheres
-        for (i, (position, color, _, _)) in mesh_data.skin_vertex_positions.iter().enumerate() {
+        for (_i, (position, color, _, _)) in mesh_data.skin_vertex_positions.iter().enumerate() {
             // Apply model rotation to vertex position around look_at_target
             let rotated_position = model_rotation.rotation * ((*position) - pivot) + pivot;
             let sphere_radius = 0.0025; // Size of the sphere (half of previous 0.005)
@@ -1709,7 +1682,7 @@ fn draw_triangles(
     
     if let Some(mesh_data) = mesh_data {
         // Draw triangle outlines only - the mesh system handles the filling
-        for (i, (name, (vertices, fill_color))) in mesh_data.triangles.iter().enumerate() {
+        for (_i, (_name, (vertices, fill_color))) in mesh_data.triangles.iter().enumerate() {
             // Determine outline color based on settings
             let outline_color = match settings.triangle_outline {
                 TriangleOutlineMode::Black => Color::BLACK,
@@ -2290,7 +2263,7 @@ fn extract_template_meshes(
             commands.entity(entity).remove::<TemplateMeshPending>();
             
             // Create a wireframe material for the template model
-            let template_material = materials.add(StandardMaterial {
+            let _template_material = materials.add(StandardMaterial {
                 base_color: Color::srgba(1.0, 0.0, 0.0, 0.0), // Fully transparent - don't render faces
                 alpha_mode: AlphaMode::Blend,
                 cull_mode: None,
@@ -2494,41 +2467,6 @@ fn make_template_transparent(
     }
 }
 
-fn make_descendants_transparent(
-    entity: Entity,
-    children_query: &Query<&Children>,
-    material_query: &mut Query<&mut Handle<StandardMaterial>>,
-    materials: &mut ResMut<Assets<StandardMaterial>>,
-    transparency: f32,
-) -> u32 {
-    let mut materials_processed = 0;
-    
-    // Try to get the material handle for this entity
-    if let Ok(mut material_handle) = material_query.get_mut(entity) {
-        // Clone the material so we can modify it
-        if let Some(material) = materials.get(&*material_handle) {
-            println!("[TEMPLATE] Found material on entity {:?}, making transparent", entity);
-            let mut new_material = material.clone();
-            new_material.alpha_mode = AlphaMode::Blend;
-            new_material.base_color = new_material.base_color.with_alpha(transparency);
-            
-            // Create a new material asset and replace the handle
-            let new_handle = materials.add(new_material);
-            *material_handle = new_handle;
-            materials_processed += 1;
-        }
-    }
-    
-    // Recursively process children
-    if let Ok(children) = children_query.get(entity) {
-        println!("[TEMPLATE] Entity {:?} has {} children", entity, children.len());
-        for &child in children.iter() {
-            materials_processed += make_descendants_transparent(child, children_query, material_query, materials, transparency);
-        }
-    }
-    
-    materials_processed
-}
 
 #[derive(Component)]
 struct TransparentTemplateProcessed;

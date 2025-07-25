@@ -1,9 +1,8 @@
 use bevy::math::Vec3;
 use bevy::prelude::*;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::error::Error;
 use serde::{Deserialize, Serialize};
-use minijinja::{Environment, context};
 
 #[derive(Debug, Clone, Deserialize, Serialize, Resource)]
 pub struct Model(pub HashMap<String, Group>);
@@ -429,10 +428,10 @@ impl Model {
                 if let Some(triangles_table) = table.get("triangles").and_then(|t| t.as_table()) {
                     
                     // Examine each triangle definition
-                    for (triangle_name, triangle_data) in triangles_table {
+                    for (_triangle_name, triangle_data) in triangles_table {
                         if let Some(tri_table) = triangle_data.as_table() {
                             if let Some(verts_value) = tri_table.get("verts") {
-                                if let Some(verts_array) = verts_value.as_array() {
+                                if let Some(_verts_array) = verts_value.as_array() {
                                 }
                             }
                         }
@@ -483,7 +482,7 @@ impl Model {
                             let mut verts = Vec::new();
                             if let Some(verts_array) = verts_value.as_array() {
                                 // Verts as array: verts = ["v1", "v2", "v3"]
-                                for (i, vert) in verts_array.iter().enumerate() {
+                                for (_i, vert) in verts_array.iter().enumerate() {
                                     if let Some(id) = vert.as_str() {
                                         verts.push(id.to_string());
                                     } else {
@@ -491,7 +490,7 @@ impl Model {
                                 }
                             } else if let Some(verts_table) = verts_value.as_table() {
                                 // Verts as table: verts = { "0" = "v1", "1" = "v2", "2" = "v3" }
-                                for (idx, vert_id) in verts_table {
+                                for (_idx, vert_id) in verts_table {
                                     if let Some(id) = vert_id.as_str() {
                                         verts.push(id.to_string());
                                     } else {
@@ -653,9 +652,9 @@ impl Model {
             if table.contains_key("triangles") {
                 
                 if let Some(triangles_table) = table.get("triangles").and_then(|t| t.as_table()) {
-                    for (tri_name, tri_value) in triangles_table {
+                    for (_tri_name, tri_value) in triangles_table {
                         
-                        if let Some(tri_table) = tri_value.as_table() {
+                        if let Some(_tri_table) = tri_value.as_table() {
                             // Triangle table found
                         }
                     }
@@ -873,51 +872,6 @@ impl Model {
         (vertices, indices, colors)
     }
 
-    fn calculate_bone_depths(&self) -> HashMap<String, u32> {
-        let mut depths = HashMap::new();
-        let bones = self.get_bones();
-
-        // Helper function to calculate depth recursively
-        fn calculate_depth(
-            bone_name: &str,
-            bones: &HashMap<String, Bone>,
-            depths: &mut HashMap<String, u32>,
-            visited: &mut HashSet<String>
-        ) -> u32 {
-            // If we've already calculated this bone's depth, return it
-            if let Some(&depth) = depths.get(bone_name) {
-                return depth;
-            }
-
-            // Prevent cycles
-            if !visited.insert(bone_name.to_string()) {
-                return 0;
-            }
-
-            // Get the bone's parent
-            let parent = "";
-
-            // Calculate depth
-            let depth = if parent.is_empty() {
-                // This is a root bone
-                0
-            } else {
-                // Recursively calculate parent's depth + 1
-                calculate_depth(parent, bones, depths, visited) + 1
-            };
-
-            depths.insert(bone_name.to_string(), depth);
-            depth
-        }
-
-        // Calculate depth for each bone
-        let mut visited = HashSet::new();
-        for bone_name in bones.keys() {
-            calculate_depth(bone_name, &bones, &mut depths, &mut visited);
-        }
-
-        depths
-    }
 
 
     pub fn collect_triangles(&self) -> Vec<Triangle> {
@@ -932,13 +886,13 @@ impl Model {
             .collect();
             
         // Build vertex_map from skin verts with IDs
-        let mut total_verts = 0;
+        let mut _total_verts = 0;
         for (bone_name, bone) in self.get_bones() {
             if let Some((start, end)) = bone_position_map.get(&bone_name) {
                 for sv in &bone.skin_verts {
                     if let Some(ref id) = sv.id {
                         let pos = sv.calculate_position(*start, *end, bone.resolved_rotation);
-                        total_verts += 1;
+                        _total_verts += 1;
                         vertex_map.insert(id.clone(), (pos, bone_name.clone()));
                     } else {
                     }
@@ -951,7 +905,7 @@ impl Model {
 
         
         // Debug print for bone counting
-        let bone_count = self.get_bones().len();
+        let _bone_count = self.get_bones().len();
         
         // Debug print all bones to see what's available
         
@@ -974,7 +928,7 @@ impl Model {
                     // Find the vertex with the given ID
                     let found_vertex = vertex_map.get(vertex_id);
                     
-                    if let Some((position, bone_name)) = found_vertex {
+                    if let Some((position, _bone_name)) = found_vertex {
                         vertex_positions.push(*position);
                     } else {
                         all_vertices_found = false;
@@ -1083,7 +1037,7 @@ impl Model {
             
             // Multi-pass resolution of template variables
             let max_passes = 10; // Prevent infinite loops
-            for pass in 0..max_passes {
+            for _pass in 0..max_passes {
                 let mut resolved_this_pass = false;
                 let mut still_pending = HashMap::new();
                 
@@ -1320,7 +1274,7 @@ impl Model {
         Ok(mirrored)
     }
     
-    fn mirror_triangle(triangle_value: &toml::Value, axis: &str) -> Result<toml::Value, Box<dyn Error>> {
+    fn mirror_triangle(triangle_value: &toml::Value, _axis: &str) -> Result<toml::Value, Box<dyn Error>> {
         let mut mirrored = triangle_value.clone();
         
         if let Some(table) = mirrored.as_table_mut() {
@@ -1453,7 +1407,7 @@ impl Model {
         }
     }
 
-    fn process_group_bones(&self, group_path: &str, transforms: &mut HashMap<String, (Mat4, Vec3)>, positions: &mut HashMap<String, (Vec3, Vec3)>) -> Option<()> {
+    fn process_group_bones(&self, group_path: &str, _transforms: &mut HashMap<String, (Mat4, Vec3)>, positions: &mut HashMap<String, (Vec3, Vec3)>) -> Option<()> {
         // Navigate to the group
         let parts: Vec<&str> = group_path.split('.').collect();
         let mut current_group = self.0.get(parts[0])?;
@@ -1530,24 +1484,6 @@ impl Model {
         }
     }
 
-// Helper function to convert HSV to RGB
-fn hsv_to_rgb(h: f32, s: f32, v: f32) -> (f32, f32, f32) {
-    let h = h % 360.0;
-    let c = v * s;
-    let x = c * (1.0 - (h / 60.0 % 2.0 - 1.0).abs());
-    let m = v - c;
-
-    let (r, g, b) = match h as i32 {
-        h if h < 60 => (c, x, 0.0),
-        h if h < 120 => (x, c, 0.0),
-        h if h < 180 => (0.0, c, x),
-        h if h < 240 => (0.0, x, c),
-        h if h < 300 => (x, 0.0, c),
-        _ => (c, 0.0, x),
-    };
-
-    (r + m, g + m, b + m)
-}
 
 // End of impl Model
 }
