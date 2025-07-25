@@ -23,23 +23,23 @@ f1 = { verts = ["ls1", "ls2", "ls3"], col = [0.0, 0.0, 1.0, 0.5] }
 f2 = { verts = ["ls2", "ls3", "ls4"], col = [1.0, 1.0, 0.0, 0.5] }
 
 [body.lower_spine.middle_spine]
-len = 0.18
+len = 0.1
 
 # Triangle definitions for middle_spine
 [body.lower_spine.middle_spine.triangles]
 
 [body.lower_spine.middle_spine.upper_spine]
-len = 0.15
+len = 0.12
 cam = { frac = 0.5, dist = "{{waist}}", rot = 180 }
 
 [body.lower_spine.middle_spine.upper_spine.left_upper_arm]
 len = 0.3
-orient = 100
-slope = 20
+orient = 92
 rot = 0
 
 [body.lower_spine.middle_spine.upper_spine.left_upper_arm.left_lower_arm]
-len = 0.3
+len = 0.4
+ 
 
 [body.lower_spine.middle_spine.upper_spine.left_upper_arm.left_lower_arm.left_hand]
 len = 0.1
@@ -60,35 +60,39 @@ len = 0.1
 len = 0.12
 
 [body.lower_spine.middle_spine.upper_spine.neck.head]
-len = 0.25
+len = 0.15
 
 
 [body.left_pelvis]
-len = 0.1
+len = 0.05
 orient = 90
 slope = 0
 rot = 0
 
 [body.left_pelvis.left_upper_leg]
-slope = -50
-len = 0.3
+orient = -1
+slope = -90
+len = 0.51
 
 [body.left_pelvis.left_upper_leg.left_lower_leg]
-len = 0.5
+len = 0.45
+orient = 5
+slope = -1
+
 
 [body.left_pelvis.left_upper_leg.left_lower_leg.left_foot]
-len = 0.3
-slope = 0
-orient = -55
+len = 0.15
+slope = 60
+orient = -80
 
 [body.right_pelvis]
-len = 0.1
+len = 0.05
 orient = -90
 slope = 0
 rot = 0
 
 [body.right_pelvis.right_upper_leg]
-slope = -50
+slope = -30
 len = 0.3
 
 [body.right_pelvis.right_upper_leg.right_lower_leg]

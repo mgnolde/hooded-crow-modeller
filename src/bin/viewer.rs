@@ -8,6 +8,7 @@ use bevy::{
         keyboard::{KeyCode, KeyboardInput},
     },
     pbr::StandardMaterial,
+    gizmos::config::{GizmoConfigStore, GizmoConfigGroup},
     render::alpha::AlphaMode,
     render::mesh::{Indices, PrimitiveTopology},
     render::render_asset::RenderAssetUsages,
@@ -23,6 +24,9 @@ use std::{
     process,
 };
 use hooded_crow_modeller::{Model, Group};
+
+#[derive(Default, Reflect, GizmoConfigGroup)]
+struct BoneGizmoConfig {}
 
 #[derive(Clone, Debug, PartialEq)]
 enum CameraMode {
@@ -141,7 +145,7 @@ impl Default for VisualizationSettings {
         let settings = Self {
             show_triangles: true, // Always show triangles by default for debugging
             visualization_mode: BoneVisualization::Solid,
-            line_width: 15.0,
+            line_width: 30.0,
             triangle_outline: TriangleOutlineMode::Black,
         };
         println!("Created default visualization settings: show_triangles={}", settings.show_triangles);
@@ -812,7 +816,7 @@ fn handle_file_changes(
         
         commands.insert_resource(VisualizationSettings {
             visualization_mode: BoneVisualization::Solid,
-            line_width: 5.0,
+            line_width: 10.0,
             show_triangles: true,
             triangle_outline, // Use preserved or default setting
         });
@@ -1367,14 +1371,12 @@ fn update_camera(
         model_rotation.rotation = rotation * model_rotation.rotation;
     }
     if keyboard.pressed(KeyCode::PageUp) && !ctrl_currently_pressed && !alt_currently_pressed {
-        // PgUp - Rotate model around Z-axis (roll)
-        let rotation = Quat::from_rotation_z(controller.rotation_speed * speed_multiplier * delta);
-        model_rotation.rotation = rotation * model_rotation.rotation;
+        // PgUp - Move camera up
+        transform.translation.y += controller.movement_speed * speed_multiplier * delta;
     }
     if keyboard.pressed(KeyCode::PageDown) && !ctrl_currently_pressed && !alt_currently_pressed {
-        // PgDown - Rotate model around Z-axis (roll, opposite)
-        let rotation = Quat::from_rotation_z(-controller.rotation_speed * speed_multiplier * delta);
-        model_rotation.rotation = rotation * model_rotation.rotation;
+        // PgDown - Move camera down
+        transform.translation.y -= controller.movement_speed * speed_multiplier * delta;
     }
 
     // ZOOM (NumPad +/- and +/- keys only, no Page Up/Down to avoid conflicts)
@@ -1668,7 +1670,7 @@ fn update_triangle_meshes(
 }
 
 fn draw_bones(
-    mut gizmos: Gizmos,
+    mut gizmos: Gizmos<BoneGizmoConfig>,
     mesh_data: Option<Res<MeshData>>,
     _settings: Res<VisualizationSettings>,
     model_rotation: Res<ModelRotation>,
@@ -1682,11 +1684,12 @@ fn draw_bones(
             // Apply model rotation to bone positions around look_at_target
             let rotated_start = model_rotation.rotation * (bone.start - pivot) + pivot;
             let rotated_end = model_rotation.rotation * (bone.end - pivot) + pivot;
-            gizmos.line(
-                rotated_start,
-                rotated_end,
-                Color::srgb(bone.color.0[0], bone.color.0[1], bone.color.0[2])
-            );
+            gizmos
+                .line(
+                    rotated_start,
+                    rotated_end,
+                    Color::srgb(bone.color.0[0], bone.color.0[1], bone.color.0[2])
+                );
         }
         
         // Draw bone end positions as arrow markers to indicate direction
@@ -1985,6 +1988,14 @@ fn update_ui(
                 });
         }
     }
+}
+
+fn update_gizmo_config(
+    mut config_store: ResMut<GizmoConfigStore>,
+    settings: Res<VisualizationSettings>,
+) {
+    let (config, _) = config_store.config_mut::<BoneGizmoConfig>();
+    config.line_width = settings.line_width;
 }
 
 fn export_to_glb(mesh_data: &MeshData, export_path: &Path) -> Result<(), Box<dyn std::error::Error>> {
@@ -2683,6 +2694,7 @@ fn main() {
     app.add_plugins(DefaultPlugins)
         .add_plugins(EguiPlugin)
         .add_plugins(bevy::pbr::wireframe::WireframePlugin)
+        .init_gizmo_group::<BoneGizmoConfig>()
         .insert_resource(MeshFile(mesh_file))
         .insert_resource(ModelRotation::default())
         .insert_resource(CameraState::default())
@@ -2734,6 +2746,7 @@ fn main() {
         .add_systems(Update, quick_exit_system)
         // Make sure the UI system runs after EguiSet::InitContexts
         .add_systems(Update, update_ui.after(bevy_egui::EguiSet::InitContexts))
+        .add_systems(Update, update_gizmo_config)
         .add_systems(PostUpdate, (draw_bones, draw_axes, draw_rulers))
         .run();
 }
